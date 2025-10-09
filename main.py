@@ -144,7 +144,7 @@ async def on_message(message):
 @bot.slash_command(name="memento", description="Guarda los últimos 30 segundos de audio del canal de voz.")
 async def memento(ctx: discord.ApplicationContext):
     voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-    if not voice_client or not voice_client.is_recording():
+    if not voice_client or not voice_client.recording:
         return await ctx.respond("No estoy grabando en este momento.", ephemeral=True)
 
     sink = voice_client.recording
