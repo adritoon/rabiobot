@@ -35,6 +35,7 @@ followed_user_ids = set()
 
 class MementoSink(discord.sinks.Sink):
     def __init__(self):
+        super().__init__() 
         # Creamos un buffer que guarda 30 segundos de audio (aprox)
         # 100 (muestras/seg) * 2 (canales) * 30 (segundos) = 6000
         self.audio_buffer = collections.deque(maxlen=6000)
