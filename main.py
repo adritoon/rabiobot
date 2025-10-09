@@ -37,30 +37,18 @@ bot_is_zombie = False
 
 class MementoSink(discord.sinks.Sink):
     def __init__(self):
-        super().__init__() 
-        # Creamos un buffer que guarda 30 segundos de audio (aprox)
-        # 100 (muestras/seg) * 2 (canales) * 30 (segundos) = 6000
+        super().__init__()
+        # CÁLCULO CORRECTO: 50 paquetes/seg * 30 segundos = 1500
         self.audio_buffer = collections.deque(maxlen=1500)
 
     def write(self, data, user):
-        # Esta función se llama cada vez que se recibe un paquete de audio
         self.audio_buffer.append(data)
 
-    def save_to_file(self, filename="memento.wav"):
-        # Esta es nuestra función personalizada para guardar el buffer
-        if not self.audio_buffer:
-            return None # No hay nada que guardar
-
-        # Usamos la librería 'wave' para crear un archivo .wav
-        with wave.open(filename, "wb") as wf:
-            wf.setnchannels(2) # Estéreo
-            wf.setsampwidth(2) # 16-bit
-            wf.setframerate(48000) # Calidad estándar de Discord
-            wf.writeframes(b"".join(self.audio_buffer))
-        
-        # Limpiamos el buffer después de guardar
+    def get_buffer_and_clear(self):
+        # Copia el contenido del buffer actual y lo limpia al instante
+        buffer_copy = list(self.audio_buffer) # Hacemos una copia para el otro hilo
         self.audio_buffer.clear()
-        return filename
+        return buffer_copy
 
 # --- 5. FUNCIÓN AUXILIAR PARA TEXT-TO-SPEECH (TTS) ---
 # (Esta función no cambia)
@@ -194,55 +182,82 @@ async def on_message(message):
 # --- 7. COMANDOS SLASH ---
 # (Comandos /ping, /bridge, /followme, /unfollowme sin cambios)
 
+def process_memento_blocking(buffer, wav_filename, mp3_filename):
+    """
+    Esta función contiene todo el trabajo pesado y está diseñada
+    para ejecutarse en un hilo separado sin bloquear el bot.
+    """
+    if not buffer:
+        return None, None
+
+    try:
+        # 1. Guardar el archivo .wav
+        with wave.open(wav_filename, "wb") as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(48000)
+            wf.writeframes(b"".join(buffer))
+
+        # 2. Convertir a .mp3
+        command = [
+            "ffmpeg", "-i", wav_filename,
+            "-vn", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+            mp3_filename
+        ]
+        subprocess.run(command, check=True, capture_output=True, timeout=10) # Añadimos un timeout de 10s
+        return wav_filename, mp3_filename
+    
+    except subprocess.CalledProcessError as e:
+        print(f"Error durante la conversión a mp3: {e.stderr.decode()}")
+        return wav_filename, None # Devolvemos el wav para que se pueda borrar
+    except Exception as e:
+        print(f"Error inesperado en process_memento_blocking: {e}")
+        return None, None
+
 @bot.slash_command(name="memento", description="Guarda los últimos 30 segundos de audio del canal de voz.")
 async def memento(ctx: discord.ApplicationContext):
-    # --- 1. DEFERIR LA RESPUESTA INMEDIATAMENTE ---
-    # Esto le dice a Discord "recibido, dame un momento" y evita el timeout.
     await ctx.defer(ephemeral=True)
 
     voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
     if not voice_client or not voice_client.recording:
-        # Usamos followup.send para la respuesta final
         return await ctx.followup.send("No estoy grabando en este momento.")
 
     sink = voice_client.sink
     
+    audio_buffer = sink.get_buffer_and_clear()
+    
+    if not audio_buffer:
+        return await ctx.followup.send("Aún no hay suficiente audio para guardar. ¡Inténtalo de nuevo en unos segundos!")
+
     timestamp = int(time.time())
     wav_filename = f"temp_{ctx.author.name}_{timestamp}.wav"
     mp3_filename = f"memento_{ctx.author.name}_{timestamp}.mp3"
-    
-    saved_file = sink.save_to_file(wav_filename)
 
-    if saved_file:
-        try:
-            command = [
-                "ffmpeg", "-i", wav_filename,
-                "-vn", "-ar", "44100", "-ac", "2", "-b:a", "192k",
-                mp3_filename
-            ]
-            subprocess.run(command, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-            print(f"Error durante la conversión a mp3: {e.stderr.decode()}")
-            await ctx.followup.send("Hubo un error al procesar el audio.")
-            os.remove(wav_filename)
-            return
-        
+    # --- EJECUCIÓN EN SEGUNDO PLANO ---
+    loop = asyncio.get_running_loop()
+    wav_file, mp3_file = await loop.run_in_executor(
+        None, process_memento_blocking, audio_buffer, wav_filename, mp3_filename
+    )
+
+    if mp3_file:
         memento_channel = bot.get_channel(MEMENTO_CHANNEL_ID)
         if memento_channel:
-            # --- 2. USAMOS FOLLOWUP.SEND PARA LA RESPUESTA DE CONFIRMACIÓN ---
             await ctx.followup.send("¡Momento guardado!")
-            await memento_channel.send(f"¡Un Memento capturado por **{ctx.author.display_name}**!", file=discord.File(mp3_filename))
+            await memento_channel.send(f"¡Un Memento capturado por **{ctx.author.display_name}**!", file=discord.File(mp3_file))
         else:
             await ctx.followup.send("No se pudo encontrar el canal para enviar el Memento.")
-        
-        try:
-            os.remove(wav_filename)
-            os.remove(mp3_filename)
-            print(f"Archivos temporales eliminados.")
-        except OSError as e:
-            print(f"Error al eliminar los archivos temporales: {e}")
     else:
-        await ctx.followup.send("Aún no hay suficiente audio para guardar un Memento. ¡Inténtalo de nuevo en unos segundos!")
+        await ctx.followup.send("Hubo un error al procesar el audio del Memento.")
+
+    # --- LIMPIEZA FINAL ---
+    try:
+        if wav_file and os.path.exists(wav_file):
+            os.remove(wav_file)
+        if mp3_file and os.path.exists(mp3_file):
+            os.remove(mp3_file)
+        print(f"Archivos temporales limpiados.")
+    except OSError as e:
+        print(f"Error al eliminar los archivos temporales: {e}")
 
 @bot.slash_command(name="ping", description="Verifica la latencia del bot.")
 async def ping(ctx: discord.ApplicationContext):
