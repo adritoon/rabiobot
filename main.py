@@ -33,7 +33,7 @@ followed_user_ids = set()
 
 # --- 4. CLASE PERSONALIZADA PARA EL SINK DE MEMENTO ---
 
-class MementoSink(discord.Sink):
+class MementoSink(discord.sinks.Sink):
     def __init__(self):
         # Creamos un buffer que guarda 30 segundos de audio (aprox)
         # 100 (muestras/seg) * 2 (canales) * 30 (segundos) = 6000
