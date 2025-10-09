@@ -13,3 +13,7 @@ TTS_BRIDGE_ROLE_NAME = "Mudo" # Puedes cambiar este nombre
 # El ID del usuario cuyo nombre NUNCA será anunciado por la función /followme.
 # Déjalo en 0 si no quieres exentar a nadie.
 FOLLOWME_EXEMPT_USER_ID = 335926762582179841 # Reemplaza con el ID real
+
+# --- Configuración de Memento ---
+# El ID del canal de texto donde se enviarán los audios guardados.
+MEMENTO_CHANNEL_ID = 1425867691725688914 # Reemplaza con el ID de tu canal #mementos
