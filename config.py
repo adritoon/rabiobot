@@ -1,8 +1,5 @@
 # config.py
 
-# --- Configuración del Bot ---
-DISCORD_TOKEN = "MTQyNTc1NzE2NDkwMjgwOTY0MQ.G87boF.3sSVzoDCGCl8ClFHv75gI7knIcFcYZB6-uj2cc"
-
 # --- Configuración del Canal de Voz 24/7 ---
 VOICE_CHANNEL_ID = 1355955093010252024 # ID del canal de voz al que se conecta
 
