@@ -7,6 +7,7 @@ from gtts import gTTS
 import collections
 import wave
 import time
+import subprocess
 
 # --- 1. CARGA DE CONFIGURACIÓN Y TOKEN ---
 from config import (
@@ -30,6 +31,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 tts_bridge_enabled = True
 followed_user_ids = set()
+bot_is_zombie = False
 
 # --- 4. CLASE PERSONALIZADA PARA EL SINK DE MEMENTO ---
 
@@ -99,21 +101,72 @@ async def once_done(sink: MementoSink, channel: discord.TextChannel, *args):
 # (El resto de los eventos como on_voice_state_update y on_message no cambian)
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # ... (código sin cambios)
+    global bot_is_zombie # Necesitamos poder modificar la variable global
+
     voice_client = discord.utils.get(bot.voice_clients, guild=member.guild)
-    if not member.bot and voice_client and after.channel == voice_client.channel and before.channel != after.channel:
-        welcome_message = f"Bienvenido, {member.display_name}"
-        await play_tts(voice_client, welcome_message, f"welcome_{member.id}.mp3")
+    designated_channel = bot.get_channel(VOICE_CHANNEL_ID)
+
+    # --- CASO 1: El bot intenta reconectarse por sí solo ---
     if member.id == bot.user.id and after.channel is None:
-        print("🔴 Bot desconectado. Intentando reconectar en 5 segundos...")
+        print("🔴 El bot ha sido desconectado. Intentando reconexión suave...")
         await asyncio.sleep(5)
+        
         try:
-            voice_channel = bot.get_channel(VOICE_CHANNEL_ID)
-            if voice_channel:
-                vc = await voice_channel.connect()
-                vc.start_recording(MementoSink(), once_done) # Vuelve a grabar
-                print("✅ Bot reconectado y grabando de nuevo.")
-        except Exception as e: print(f"❌ Error al reconectar: {e}")
+            vc = await designated_channel.connect()
+            vc.start_recording(MementoSink(), once_done)
+            bot_is_zombie = False # Si se conecta bien, no es un zombie
+            print("✅ Bot reconectado exitosamente (conexión suave).")
+
+        except discord.errors.ClientException as e:
+            if "Already connected" in str(e):
+                print("🤖 Estado 'zombie' detectado. El bot está conectado pero no funcional.")
+                
+                # LA LÓGICA CLAVE QUE PEDISTE:
+                if designated_channel and len(designated_channel.members) > 0:
+                    print("Hay usuarios en el canal. Realizando reconexión forzada ahora...")
+                    try:
+                        # Forzamos la desconexión y reconexión (la "cirugía")
+                        current_vc = discord.utils.get(bot.voice_clients, guild=member.guild)
+                        if current_vc:
+                            await current_vc.disconnect(force=True)
+                            await asyncio.sleep(1)
+                        
+                        vc = await designated_channel.connect()
+                        vc.start_recording(MementoSink(), once_done)
+                        bot_is_zombie = False # Se ha curado
+                        print("✅ Cirugía completada. El bot está funcional de nuevo.")
+                    except Exception as surgery_error:
+                        print(f"❌ Error durante la cirugía de reconexión: {surgery_error}")
+                else:
+                    print("El canal está vacío. El bot permanecerá en modo zombie hasta que alguien se una.")
+                    bot_is_zombie = True # Marcamos al bot como zombie
+            else:
+                 print(f"❌ Error inesperado durante la reconexión: {e}")
+        return
+
+    # --- CASO 2: Un usuario entra a un canal ---
+    if not member.bot and after.channel == designated_channel:
+        # Si el bot está en modo zombie, la entrada de un usuario es la señal para repararse.
+        if bot_is_zombie:
+            print(f"👤 {member.display_name} ha entrado. Es la señal para curar al bot zombie.")
+            try:
+                # Realizamos la misma cirugía de reconexión forzada
+                current_vc = discord.utils.get(bot.voice_clients, guild=member.guild)
+                if current_vc:
+                    await current_vc.disconnect(force=True)
+                    await asyncio.sleep(1)
+                
+                vc = await designated_channel.connect()
+                vc.start_recording(MementoSink(), once_done)
+                bot_is_zombie = False # Curado
+                print("✅ El bot ha sido curado por la presencia de un usuario y está funcional.")
+            except Exception as surgery_error:
+                print(f"❌ Error durante la cirugía de reconexión inducida por el usuario: {surgery_error}")
+        
+        # Si el bot está sano, es una bienvenida normal (si el usuario es nuevo en el canal)
+        elif voice_client and before.channel != after.channel:
+            welcome_message = f"Bienvenido, {member.display_name}"
+            await play_tts(voice_client, welcome_message, f"welcome_{member.id}.mp3")
 
 @bot.event
 async def on_message(message):
@@ -148,21 +201,56 @@ async def memento(ctx: discord.ApplicationContext):
         return await ctx.respond("No estoy grabando en este momento.", ephemeral=True)
 
     sink = voice_client.sink
-    filename = f"memento_{ctx.author.name}_{int(time.time())}.wav"
-    saved_file = sink.save_to_file(filename)
+    
+    # Nombres para los archivos temporales
+    timestamp = int(time.time())
+    wav_filename = f"temp_{ctx.author.name}_{timestamp}.wav"
+    mp3_filename = f"memento_{ctx.author.name}_{timestamp}.mp3"
+    
+    # Guardamos el archivo .wav como antes
+    saved_file = sink.save_to_file(wav_filename)
 
     if saved_file:
+        # --- NUEVO PASO: CONVERSIÓN A MP3 USANDO FFMPEG ---
+        print(f"Convirtiendo {wav_filename} a {mp3_filename}...")
+        try:
+            # Comando para convertir .wav a .mp3 con una calidad estándar
+            command = [
+                "ffmpeg",
+                "-i", wav_filename,
+                "-vn",
+                "-ar", "44100",
+                "-ac", "2",
+                "-b:a", "192k",
+                mp3_filename
+            ]
+            subprocess.run(command, check=True, capture_output=True)
+            print("Conversión exitosa.")
+        except subprocess.CalledProcessError as e:
+            print(f"Error durante la conversión a mp3: {e.stderr.decode()}")
+            await ctx.respond("Hubo un error al procesar el audio.", ephemeral=True)
+            os.remove(wav_filename) # Limpia el .wav incluso si falla
+            return
+        
+        # --- FIN DEL NUEVO PASO ---
+
         memento_channel = bot.get_channel(MEMENTO_CHANNEL_ID)
         if memento_channel:
             await ctx.respond("¡Momento guardado!", ephemeral=True)
-            await memento_channel.send(f"¡Un Memento capturado por **{ctx.author.display_name}**!", file=discord.File(saved_file))
-            try:
-                os.remove(saved_file)
-                print(f"Archivo temporal '{saved_file}' eliminado exitosamente.")
-            except OSError as e:
-                print(f"Error al eliminar el archivo temporal: {e}")
+            # Enviamos el archivo .mp3, que es mucho más ligero
+            await memento_channel.send(f"¡Un Memento capturado por **{ctx.author.display_name}**!", file=discord.File(mp3_filename))
+            
         else:
             await ctx.respond("No se pudo encontrar el canal para enviar el Memento.", ephemeral=True)
+        
+        # --- LIMPIEZA DE AMBOS ARCHIVOS ---
+        try:
+            os.remove(wav_filename)
+            os.remove(mp3_filename)
+            print(f"Archivos temporales '{wav_filename}' y '{mp3_filename}' eliminados.")
+        except OSError as e:
+            print(f"Error al eliminar los archivos temporales: {e}")
+
     else:
         await ctx.respond("Aún no hay suficiente audio para guardar un Memento. ¡Inténtalo de nuevo en unos segundos!", ephemeral=True)
 
