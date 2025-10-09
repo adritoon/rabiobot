@@ -58,7 +58,8 @@ async def play_tts(voice_client, text, filename="tts.mp3"):
         tts = gTTS(text=text, lang='es', slow=False)
         tts.save(filename)
         while voice_client.is_playing(): await asyncio.sleep(0.5)
-        source = discord.FFmpegPCMAudio(filename)
+        ffmpeg_options = {"options": "-af atempo=1.25"}
+        source = discord.FFmpegPCMAudio(filename, **ffmpeg_options)
         voice_client.play(source)
         while voice_client.is_playing(): await asyncio.sleep(0.5)
         os.remove(filename)
