@@ -147,7 +147,7 @@ async def memento(ctx: discord.ApplicationContext):
     if not voice_client or not voice_client.recording:
         return await ctx.respond("No estoy grabando en este momento.", ephemeral=True)
 
-    sink = voice_client.recording
+    sink = voice_client.sink
     filename = f"memento_{ctx.author.name}_{int(time.time())}.wav"
     saved_file = sink.save_to_file(filename)
 
