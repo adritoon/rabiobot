@@ -78,18 +78,17 @@ async def play_tts(voice_client, text, filename="tts.mp3"):
 # --- 6. EVENTOS PRINCIPALES DEL BOT ---
 @bot.event
 async def on_ready():
-    print(f'✅ Bot conectado como: {bot.user.name}')
+    print(f'✅ Bot conectado como: {bot.user.name} (ID: {bot.user.id})')
     voice_channel = bot.get_channel(VOICE_CHANNEL_ID)
     if voice_channel:
         try:
-            # Simplificamos al máximo: solo nos conectamos.
-            await voice_channel.connect()
+            vc = await voice_channel.connect()
             print(f'🔗 Conectado a {voice_channel.name}.')
-            print("INFO: La grabación de Memento está desactivada para diagnóstico de estabilidad.")
-
+            # ¡AQUÍ EMPIEZA A "ESCUCHAR"!
+            vc.start_recording(MementoSink(), once_done)
+            print("🎙️ El bot ha comenzado a escuchar para la función Memento.")
         except Exception as e:
-            # Actualizamos el mensaje de error para ser más precisos
-            print(f'❌ Error durante la conexión inicial al canal de voz: {e}')
+            print(f'❌ Error al conectar o iniciar grabación: {e}')
 
 async def once_done(sink: MementoSink, channel: discord.TextChannel, *args):
     # Esta función se llama si la grabación se detiene por alguna razón.
@@ -111,7 +110,7 @@ async def on_voice_state_update(member, before, after):
         
         try:
             vc = await designated_channel.connect()
-            #vc.start_recording(MementoSink(), once_done)
+            vc.start_recording(MementoSink(), once_done)
             bot_is_zombie = False # Si se conecta bien, no es un zombie
             print("✅ Bot reconectado exitosamente (conexión suave).")
 
@@ -130,7 +129,7 @@ async def on_voice_state_update(member, before, after):
                             await asyncio.sleep(1)
                         
                         vc = await designated_channel.connect()
-                        #vc.start_recording(MementoSink(), once_done)
+                        vc.start_recording(MementoSink(), once_done)
                         bot_is_zombie = False # Se ha curado
                         print("✅ Cirugía completada. El bot está funcional de nuevo.")
                     except Exception as surgery_error:
@@ -155,7 +154,7 @@ async def on_voice_state_update(member, before, after):
                     await asyncio.sleep(1)
                 
                 vc = await designated_channel.connect()
-                #vc.start_recording(MementoSink(), once_done)
+                vc.start_recording(MementoSink(), once_done)
                 bot_is_zombie = False # Curado
                 print("✅ El bot ha sido curado por la presencia de un usuario y está funcional.")
             except Exception as surgery_error:
