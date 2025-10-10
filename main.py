@@ -28,6 +28,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tts_bridge_enabled = True
 followed_user_ids = set()
 bot_is_zombie = False
+bot_is_ready = False
 
 # --- 4. FUNCIÓN AUXILIAR PARA TEXT-TO-SPEECH (TTS) ---
 async def play_tts(voice_client, text, filename="tts.mp3"):
@@ -48,17 +49,25 @@ async def play_tts(voice_client, text, filename="tts.mp3"):
 # --- 5. EVENTOS PRINCIPALES DEL BOT ---
 @bot.event
 async def on_ready():
+    global bot_is_ready # <-- AÑADE ESTA LÍNEA
     print(f'✅ Bot conectado como: {bot.user.name}')
     voice_channel = bot.get_channel(VOICE_CHANNEL_ID)
     if voice_channel:
         try:
             await voice_channel.connect()
             print(f'🔗 Conectado a {voice_channel.name}.')
+            # (Aquí iría la línea de start_recording si estuviera activa)
+            print("INFO: La grabación de Memento está desactivada para diagnóstico.")
+            bot_is_ready = True # <-- AÑADE ESTA LÍNEA AL FINAL DEL TRY
+
         except Exception as e:
             print(f'❌ Error durante la conexión inicial: {e}')
 
 @bot.event
 async def on_voice_state_update(member, before, after):
+    if not bot_is_ready: # <-- AÑADE ESTA LÍNEA
+        return 
+    
     global bot_is_zombie
     voice_client = discord.utils.get(bot.voice_clients, guild=member.guild)
     designated_channel = bot.get_channel(VOICE_CHANNEL_ID)
