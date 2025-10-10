@@ -1,7 +1,7 @@
 # config.py
 
 # --- Configuración del Canal de Voz 24/7 ---
-VOICE_CHANNEL_ID = 1311006915202908245 # ID del canal de voz al que se conecta
+VOICE_CHANNEL_ID = 1369129286052741212 # ID del canal de voz al que se conecta
 
 # --- Configuración del Puente de Voz (TTS Bridge) ---
 # El bot solo leerá mensajes de este canal de texto.
