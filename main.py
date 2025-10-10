@@ -85,8 +85,8 @@ async def on_ready():
             vc = await voice_channel.connect()
             print(f'🔗 Conectado a {voice_channel.name}.')
             # ¡AQUÍ EMPIEZA A "ESCUCHAR"!
-            vc.start_recording(MementoSink(), once_done)
-            print("🎙️ El bot ha comenzado a escuchar para la función Memento.")
+            #vc.start_recording(MementoSink(), once_done)
+            #print("🎙️ El bot ha comenzado a escuchar para la función Memento.")
         except Exception as e:
             print(f'❌ Error al conectar o iniciar grabación: {e}')
 
@@ -110,7 +110,7 @@ async def on_voice_state_update(member, before, after):
         
         try:
             vc = await designated_channel.connect()
-            vc.start_recording(MementoSink(), once_done)
+            #vc.start_recording(MementoSink(), once_done)
             bot_is_zombie = False # Si se conecta bien, no es un zombie
             print("✅ Bot reconectado exitosamente (conexión suave).")
 
@@ -129,7 +129,7 @@ async def on_voice_state_update(member, before, after):
                             await asyncio.sleep(1)
                         
                         vc = await designated_channel.connect()
-                        vc.start_recording(MementoSink(), once_done)
+                        #vc.start_recording(MementoSink(), once_done)
                         bot_is_zombie = False # Se ha curado
                         print("✅ Cirugía completada. El bot está funcional de nuevo.")
                     except Exception as surgery_error:
@@ -154,7 +154,7 @@ async def on_voice_state_update(member, before, after):
                     await asyncio.sleep(1)
                 
                 vc = await designated_channel.connect()
-                vc.start_recording(MementoSink(), once_done)
+                #vc.start_recording(MementoSink(), once_done)
                 bot_is_zombie = False # Curado
                 print("✅ El bot ha sido curado por la presencia de un usuario y está funcional.")
             except Exception as surgery_error:
