@@ -78,17 +78,18 @@ async def play_tts(voice_client, text, filename="tts.mp3"):
 # --- 6. EVENTOS PRINCIPALES DEL BOT ---
 @bot.event
 async def on_ready():
-    print(f'✅ Bot conectado como: {bot.user.name} (ID: {bot.user.id})')
+    print(f'✅ Bot conectado como: {bot.user.name}')
     voice_channel = bot.get_channel(VOICE_CHANNEL_ID)
     if voice_channel:
         try:
-            vc = await voice_channel.connect()
+            # Simplificamos al máximo: solo nos conectamos.
+            await voice_channel.connect()
             print(f'🔗 Conectado a {voice_channel.name}.')
-            # ¡AQUÍ EMPIEZA A "ESCUCHAR"!
-            #vc.start_recording(MementoSink(), once_done)
-            #print("🎙️ El bot ha comenzado a escuchar para la función Memento.")
+            print("INFO: La grabación de Memento está desactivada para diagnóstico de estabilidad.")
+
         except Exception as e:
-            print(f'❌ Error al conectar o iniciar grabación: {e}')
+            # Actualizamos el mensaje de error para ser más precisos
+            print(f'❌ Error durante la conexión inicial al canal de voz: {e}')
 
 async def once_done(sink: MementoSink, channel: discord.TextChannel, *args):
     # Esta función se llama si la grabación se detiene por alguna razón.
