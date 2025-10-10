@@ -38,15 +38,23 @@ bot_is_zombie = False
 class MementoSink(discord.sinks.Sink):
     def __init__(self):
         super().__init__()
-        # CÁLCULO CORRECTO: 50 paquetes/seg * 30 segundos = 1500
-        self.audio_buffer = collections.deque(maxlen=1500)
+        self.buffer_duration = 30  # Duración del Memento en segundos
+        # El buffer ahora guardará tuplas de (timestamp, data)
+        self.audio_buffer = collections.deque()
 
     def write(self, data, user):
-        self.audio_buffer.append(data)
+        # 1. Guardamos el paquete de audio junto con la hora actual
+        timestamp = time.time()
+        self.audio_buffer.append((timestamp, data))
+        
+        # 2. Poda del buffer: eliminamos cualquier paquete que tenga más de 30 segundos
+        while self.audio_buffer and timestamp - self.audio_buffer[0][0] > self.buffer_duration:
+            self.audio_buffer.popleft()
 
     def get_buffer_and_clear(self):
-        # Copia el contenido del buffer actual y lo limpia al instante
-        buffer_copy = list(self.audio_buffer) # Hacemos una copia para el otro hilo
+        # Extraemos solo los datos de audio (el segundo elemento de la tupla)
+        # para enviarlos a la función de guardado.
+        buffer_copy = [item[1] for item in self.audio_buffer]
         self.audio_buffer.clear()
         return buffer_copy
 
