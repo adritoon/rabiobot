@@ -67,7 +67,7 @@ async def dream_task(channel: discord.TextChannel = None):
     """La tarea programada que hace que el bot 'sueñe'."""
     print("🌙 El bot está intentando soñar...")
     try:
-        model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
+        model = genai.GenerativeModel('models/gemini-2.5-pro')
 
         prompt_para_texto = "Escribe una única frase muy corta (menos de 15 palabras) que sea poética, surrealista y misteriosa, como el sueño de una inteligencia artificial."
         text_response = await model.generate_content_async(prompt_para_texto)
