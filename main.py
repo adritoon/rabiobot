@@ -1,4 +1,3 @@
-# main.py
 import discord
 from discord.ext import commands
 import asyncio
@@ -20,7 +19,17 @@ from config import (
     DREAM_CHANNEL_ID
 )
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-# No necesitamos más la variable GEMINI_API_KEY ni el bloque genai.configure()
+
+# --- NUEVA CONFIGURACIÓN CORRECTA DE GEMINI ---  
+# Obtén tu ID de proyecto de la Google Cloud Console
+PROJECT_ID = "plucky-rarity-473620-v0"
+
+if PROJECT_ID:
+    genai.init(project=PROJECT_ID)
+    print("✅ La API de Gemini se ha inicializado con el proyecto de Vertex AI.")
+else:
+    print("⚠️ Advertencia: No se ha configurado un ID de proyecto. El bot no podrá soñar.")
+# --- FIN DE LA NUEVA CONFIGURACIÓN ---
 
 # --- 2. CONFIGURACIÓN DE INTENTS DEL BOT ---
 intents = discord.Intents.default()
