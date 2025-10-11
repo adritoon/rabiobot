@@ -17,3 +17,5 @@ FOLLOWME_EXEMPT_USER_ID = 335926762582179841 # Reemplaza con el ID real
 # --- Configuración de Memento ---
 # El ID del canal de texto donde se enviarán los audios guardados.
 MEMENTO_CHANNEL_ID = 1425867691725688914 # Reemplaza con el ID de tu canal #mementos
+
+DREAM_CHANNEL_ID = 1426470503710720031
