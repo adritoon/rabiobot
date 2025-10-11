@@ -9,6 +9,7 @@ import io
 import google.generativeai as genai
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+import time
 
 # --- 1. CARGA DE CONFIGURACIÓN Y TOKEN ---
 from config import (
