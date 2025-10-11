@@ -9,6 +9,8 @@ import google.generativeai as genai
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import time
+import re
+import aiohttp
 
 # --- 1. CARGA DE CONFIGURACIÓN Y TOKEN ---
 from config import (
@@ -67,42 +69,47 @@ async def dream_task(channel: discord.TextChannel = None):
     """La tarea programada que hace que el bot 'sueñe'."""
     print("🌙 El bot está intentando soñar...")
     try:
-        model = genai.GenerativeModel('models/gemini-2.5-pro')
+        model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
 
-        prompt_para_texto = "Escribe una única frase muy corta (menos de 15 palabras) que sea poética, surrealista y misteriosa, como el sueño de una inteligencia artificial."
+        prompt_para_texto = (
+            "Escribe una única frase muy corta (menos de 15 palabras) que sea poética, surrealista y misteriosa, "
+            "como el sueño de una inteligencia artificial."
+        )
         text_response = await model.generate_content_async(prompt_para_texto)
         dream_text = text_response.text.strip().replace('*', '')
-        print(f"Texto del sueño generado: '{dream_text}'")
+        print(f"🪶 Texto del sueño: '{dream_text}'")
 
         prompt_para_imagen = (
-            f"Crea una imagen artística, de alta calidad, surrealista y de ensueño basada en esta frase: '{dream_text}'. "
-            "Estilo: pintura digital etérea, colores melancólicos, cinematográfico."
+            f"Genera una imagen artística y surrealista inspirada en esta frase: '{dream_text}'. "
+            "Describe la escena con detalle poético y genera un enlace directo a la imagen en formato Markdown."
         )
         image_response = await model.generate_content_async(prompt_para_imagen)
-        
-        try:
-            image_data = image_response.parts[0].inline_data.data
-            if not image_data:
-                raise ValueError("Los datos de la imagen están vacíos.")
-        except (IndexError, AttributeError, ValueError) as e:
-            print(f"❌ Error al extraer la imagen: {e}. La respuesta de la API fue:")
-            print(image_response)
-            if channel:
-                try:
-                    block_reason = image_response.prompt_feedback.block_reason.name
-                    await channel.send(f"Lo siento, no pude generar una imagen. Razón del bloqueo: **{block_reason}**.")
-                except:
-                    await channel.send("Lo siento, la IA no generó una imagen válida.")
-            return
+        image_text = image_response.text
 
-        image_file = discord.File(io.BytesIO(image_data), filename="sueño.png")
+        # Buscar URL de imagen tipo Markdown
+        image_url_match = re.search(r'!\[.*?\]\((https?://[^\s)]+)\)', image_text)
+        if not image_url_match:
+            raise ValueError("No se encontró una URL de imagen en la respuesta.")
+
+        image_url = image_url_match.group(1)
+        print(f"🖼️ URL de imagen generada: {image_url}")
+
+        # Descargar la imagen desde el enlace
+        async with aiohttp.ClientSession() as session:
+            async with session.get(image_url) as resp:
+                if resp.status != 200:
+                    raise ValueError(f"No se pudo descargar la imagen: {resp.status}")
+                image_bytes = await resp.read()
+
+        # Enviar al canal de sueños
         target_channel = channel or bot.get_channel(DREAM_CHANNEL_ID)
-        
         if target_channel:
+            image_file = discord.File(io.BytesIO(image_bytes), filename="sueño.png")
             await target_channel.send(f"> {dream_text}", file=image_file)
-            print(f"😴 El bot ha soñado: {dream_text}")
+            print("😴 El bot ha soñado con éxito.")
         else:
-            print(f"❌ No se encontró el canal de sueños.")
+            print("❌ No se encontró el canal de sueños.")
+
     except Exception as e:
         print(f"Error durante el sueño del bot: {e}")
 
