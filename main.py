@@ -71,52 +71,50 @@ async def dream_task(channel: discord.TextChannel = None):
         print("❌ El bot no puede soñar sin una API Key de Gemini.")
         return
     try:
-        # 1. Generar el texto poético (tu estructura preferida)
+        # 1. Generar el texto poético
         text_model = genai.GenerativeModel('gemini-2.5-pro')
-        prompt_para_texto = "Escribe una única frase muy corta (menos de 15 palabras) que sea poética, surrealista y misteriosa, como el sueño de una inteligencia artificial."
+        prompt_para_texto = (
+            "Escribe una única frase muy corta (menos de 15 palabras) "
+            "que sea poética, surrealista y misteriosa, como el sueño de una inteligencia artificial."
+        )
         text_response = await text_model.generate_content_async(prompt_para_texto)
         dream_text = text_response.text.strip().replace('*', '')
         print(f"Texto del sueño generado: '{dream_text}'")
 
-        # 2. Generar la imagen a partir del texto (tu estructura preferida)
-        image_model = genai.GenerativeModel('imagen-4.0-generate-001')
+        # 2. Generar la imagen a partir del texto
         prompt_para_imagen = (
             f"Crea una imagen artística, de alta calidad, surrealista y de ensueño basada en esta frase: '{dream_text}'. "
             "Estilo: pintura digital etérea, colores melancólicos, cinematográfico."
         )
-        image_response = await image_model.generate_content_async(prompt_para_imagen)
-        
-        # --- INSPECCIÓN PROFUNDA DE LA RESPUESTA ---
+        image_response = genai.generate_images(
+            model="imagen-4.0-generate-001",
+            prompt=prompt_para_imagen
+        )
+
+        # --- INSPECCIÓN DE RESPUESTA ---
         print("--- Respuesta completa de la API de imagen ---")
-        print(image_response) # Imprimimos la respuesta completa para analizarla
+        print(image_response)
         print("---------------------------------------------")
 
-        # Intentamos acceder a los datos de la imagen de forma segura
         try:
-            image_data = image_response.parts[0].inline_data.data
-            if not image_data: # Verificamos si los datos están vacíos
+            image_data = image_response.images[0].bytes
+            if not image_data:
                 raise ValueError("Los datos de la imagen están vacíos.")
         except (IndexError, AttributeError, ValueError) as e:
             print(f"❌ Error al extraer la imagen: {e}. Es probable que la solicitud haya sido bloqueada por filtros de seguridad.")
             if channel:
-                # Intentamos obtener la razón del bloqueo si está disponible
-                try:
-                    block_reason = image_response.prompt_feedback.block_reason.name
-                    await channel.send(f"Lo siento, no pude generar una imagen. Razón del bloqueo: **{block_reason}**.")
-                except:
-                    await channel.send("Lo siento, la IA no generó una imagen válida, probablemente por sus filtros de seguridad.")
+                await channel.send("Lo siento, la IA no generó una imagen válida o fue bloqueada por filtros de seguridad.")
             return
-        # --- FIN DE LA INSPECCIÓN ---
 
         image_file = discord.File(io.BytesIO(image_data), filename="sueño.png")
-
         target_channel = channel or bot.get_channel(DREAM_CHANNEL_ID)
-        
+
         if target_channel:
             await target_channel.send(f"> {dream_text}", file=image_file)
             print(f"😴 El bot ha soñado: {dream_text}")
         else:
-            print(f"❌ No se encontró el canal de sueños.")
+            print("❌ No se encontró el canal de sueños.")
+
     except Exception as e:
         print(f"Error durante el sueño del bot: {e}")
 
