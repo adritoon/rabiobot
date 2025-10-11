@@ -71,12 +71,12 @@ async def dream_task(channel: discord.TextChannel = None):
         print("❌ El bot no puede soñar sin una API Key de Gemini.")
         return
     try:
-        text_model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        text_model = genai.GenerativeModel('gemini-pro-latest')
         prompt_para_texto = "Escribe una única frase muy corta (menos de 15 palabras) que sea poética, surrealista y misteriosa, como el sueño de una inteligencia artificial."
         text_response = await text_model.generate_content_async(prompt_para_texto)
         dream_text = text_response.text.strip().replace('*', '')
 
-        image_model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        image_model = genai.GenerativeModel('gemini-2.5-flash-image')
         prompt_para_imagen = (
             f"Crea una imagen artística, de alta calidad, surrealista y de ensueño basada en esta frase: '{dream_text}'. "
             "Estilo: pintura digital etérea, colores melancólicos, cinematográfico."
