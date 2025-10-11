@@ -11,7 +11,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import time
 
-
 # --- 1. CARGA DE CONFIGURACIÓN Y TOKEN ---
 from config import (
     VOICE_CHANNEL_ID,
@@ -21,6 +20,7 @@ from config import (
     DREAM_CHANNEL_ID
 )
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+# No necesitamos más la variable GEMINI_API_KEY ni el bloque genai.configure()
 
 # --- 2. CONFIGURACIÓN DE INTENTS DEL BOT ---
 intents = discord.Intents.default()
@@ -38,7 +38,7 @@ bot_is_zombie = False
 bot_is_ready = False
 last_reconnect_attempt = 0
 
-# --- 4. FUNCIÓN AUXILIAR PARA TEXT-TO-SPEECH (TTS) ---
+# --- 4. FUNCIONES AUXILIARES ---
 async def play_tts(voice_client, text, filename="tts.mp3"):
     if not voice_client or not voice_client.is_connected(): return
     try:
@@ -57,45 +57,36 @@ async def play_tts(voice_client, text, filename="tts.mp3"):
 async def dream_task(channel: discord.TextChannel = None):
     """La tarea programada que hace que el bot 'sueñe'."""
     print("🌙 El bot está intentando soñar...")
-    if not GEMINI_API_KEY:
-        print("❌ El bot no puede soñar sin una API Key de Gemini.")
-        return
     try:
-        # Usamos el modelo multimodal más potente y estable para AMBAS tareas.
         model = genai.GenerativeModel('gemini-1.5-pro')
 
-        # 1. Generar el texto poético
         prompt_para_texto = "Escribe una única frase muy corta (menos de 15 palabras) que sea poética, surrealista y misteriosa, como el sueño de una inteligencia artificial."
         text_response = await model.generate_content_async(prompt_para_texto)
         dream_text = text_response.text.strip().replace('*', '')
         print(f"Texto del sueño generado: '{dream_text}'")
 
-        # 2. Generar la imagen a partir del texto
         prompt_para_imagen = (
             f"Crea una imagen artística, de alta calidad, surrealista y de ensueño basada en esta frase: '{dream_text}'. "
             "Estilo: pintura digital etérea, colores melancólicos, cinematográfico."
         )
         image_response = await model.generate_content_async(prompt_para_imagen)
         
-        # --- MANEJO DE ERRORES FINAL ---
         try:
             image_data = image_response.parts[0].inline_data.data
             if not image_data:
                 raise ValueError("Los datos de la imagen están vacíos.")
         except (IndexError, AttributeError, ValueError) as e:
             print(f"❌ Error al extraer la imagen: {e}. La respuesta de la API fue:")
-            print(image_response) # Imprimimos la respuesta completa para ver por qué falló
+            print(image_response)
             if channel:
                 try:
                     block_reason = image_response.prompt_feedback.block_reason.name
                     await channel.send(f"Lo siento, no pude generar una imagen. Razón del bloqueo: **{block_reason}**.")
                 except:
-                    await channel.send("Lo siento, la IA no generó una imagen válida, probablemente por sus filtros de seguridad.")
+                    await channel.send("Lo siento, la IA no generó una imagen válida.")
             return
-        # --- FIN DEL MANEJO DE ERRORES ---
 
         image_file = discord.File(io.BytesIO(image_data), filename="sueño.png")
-
         target_channel = channel or bot.get_channel(DREAM_CHANNEL_ID)
         
         if target_channel:
@@ -118,12 +109,12 @@ async def on_ready():
             print(f'🔗 Conectado a {voice_channel.name}.')
             bot_is_ready = True
             
-            if GEMINI_API_KEY:
-                scheduler = AsyncIOScheduler(timezone="America/Lima")
-                trigger = CronTrigger(hour=3, minute=0, jitter=7200)
-                scheduler.add_job(dream_task, trigger)
-                scheduler.start()
-                print("⏰ El programador de sueños está activo.")
+            # El programador se inicia siempre. La función dream_task verificará si puede correr.
+            scheduler = AsyncIOScheduler(timezone="America/Lima")
+            trigger = CronTrigger(hour=3, minute=0, jitter=7200)
+            scheduler.add_job(dream_task, trigger)
+            scheduler.start()
+            print("⏰ El programador de sueños está activo.")
         except Exception as e:
             print(f'❌ Error durante la conexión inicial: {e}')
 
@@ -198,15 +189,14 @@ async def on_message(message):
 
 # --- 6. COMANDOS SLASH ---
 @bot.slash_command(name="test_dream", description="Fuerza al bot a soñar ahora mismo para pruebas.")
-@commands.is_owner() # Opcional: solo tú podrás usar este comando
+@commands.is_owner()
 async def test_dream(ctx: discord.ApplicationContext):
     """Ejecuta la tarea del sueño manualmente."""
     await ctx.defer(ephemeral=True)
     print(f"--- Forzando un sueño por orden de {ctx.author.name} ---")
-    await dream_task(channel=ctx.channel) # Llama a la función y le pasa el canal actual
+    await dream_task(channel=ctx.channel)
     await ctx.followup.send("Intento de sueño completado. Revisa la consola para ver los logs.")
 
-# Opcional: Añade un manejador de error si no eres el dueño
 @test_dream.error
 async def test_dream_error(ctx, error):
     if isinstance(error, commands.NotOwner):
