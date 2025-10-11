@@ -71,51 +71,47 @@ async def dream_task(channel: discord.TextChannel = None):
         print("❌ El bot no puede soñar sin una API Key de Gemini.")
         return
     try:
-        # Usamos un único modelo multimodal y fiable para ambas tareas
-        model = genai.GenerativeModel('gemini-2.5-pro')
-
-        # 1. Generar el texto poético
-        prompt_para_texto = "Escribe una única frase muy corta (menos de 15 palabras) que sea poética, surrealista y misteriosa, como el sueño de una inteligencia artificial."
-        text_response = await model.generate_content_async(prompt_para_texto)
+        # --- PASO 1: Usamos un modelo de TEXTO estable de tu lista ---
+        text_model = genai.GenerativeModel('gemini-pro-latest')
+        prompt_para_texto = (
+            "Escribe una única frase muy corta (menos de 15 palabras) "
+            "que sea poética, surrealista y misteriosa, como el sueño de una inteligencia artificial."
+        )
+        text_response = await text_model.generate_content_async(prompt_para_texto)
         dream_text = text_response.text.strip().replace('*', '')
         print(f"Texto del sueño generado: '{dream_text}'")
 
-        # 2. Generar la imagen a partir del texto
+        # --- PASO 2: Usamos un modelo de IMAGEN dedicado de tu lista ---
+        image_model = genai.GenerativeModel('models/imagen-4.0-generate-001')
+        
         prompt_para_imagen = (
-            f"Crea una imagen artística, de alta calidad, surrealista y de ensueño basada en esta frase: '{dream_text}'. "
+            f"Una imagen artística, de alta calidad, surrealista y de ensueño basada en esta frase: '{dream_text}'. "
             "Estilo: pintura digital etérea, colores melancólicos, cinematográfico."
         )
-        image_response = await model.generate_content_async(prompt_para_imagen)
         
-        # --- MANEJO DE ERRORES ROBUSTO ---
+        image_response = await image_model.generate_content_async(prompt_para_imagen)
+
+        # --- INSPECCIÓN Y MANEJO DE LA RESPUESTA ---
         try:
-            # Intentamos acceder a los datos de la imagen
             image_data = image_response.parts[0].inline_data.data
-            if not image_data: # Verificamos si los datos están vacíos
+            if not image_data:
                 raise ValueError("Los datos de la imagen están vacíos.")
         except (IndexError, AttributeError, ValueError) as e:
-            # Si falla, es porque la API no devolvió una imagen válida.
-            print(f"❌ Error al extraer la imagen: {e}. La respuesta de la API fue:")
-            print(image_response) # Imprimimos la respuesta completa para ver por qué falló
+            print(f"❌ Error al extraer la imagen: {e}. Es probable que la solicitud haya sido bloqueada.")
             if channel:
-                # Intentamos obtener la razón del bloqueo si está disponible
-                try:
-                    block_reason = image_response.prompt_feedback.block_reason.name
-                    await channel.send(f"Lo siento, no pude generar una imagen. Razón del bloqueo: **{block_reason}**.")
-                except:
-                    await channel.send("Lo siento, la IA no generó una imagen válida, probablemente por sus filtros de seguridad.")
+                # ... (resto del manejo de errores)
+                await channel.send("Lo siento, la IA no generó una imagen válida o fue bloqueada por filtros de seguridad.")
             return
-        # --- FIN DEL MANEJO DE ERRORES ---
 
         image_file = discord.File(io.BytesIO(image_data), filename="sueño.png")
-
         target_channel = channel or bot.get_channel(DREAM_CHANNEL_ID)
-        
+
         if target_channel:
             await target_channel.send(f"> {dream_text}", file=image_file)
             print(f"😴 El bot ha soñado: {dream_text}")
         else:
-            print(f"❌ No se encontró el canal de sueños.")
+            print("❌ No se encontró el canal de sueños.")
+
     except Exception as e:
         print(f"Error durante el sueño del bot: {e}")
 
