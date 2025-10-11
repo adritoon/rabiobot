@@ -71,11 +71,13 @@ async def dream_task(channel: discord.TextChannel = None):
         print("❌ El bot no puede soñar sin una API Key de Gemini.")
         return
     try:
+        # 1. Generar el texto poético
         text_model = genai.GenerativeModel('gemini-2.5-pro')
         prompt_para_texto = "Escribe una única frase muy corta (menos de 15 palabras) que sea poética, surrealista y misteriosa, como el sueño de una inteligencia artificial."
         text_response = await text_model.generate_content_async(prompt_para_texto)
         dream_text = text_response.text.strip().replace('*', '')
 
+        # 2. Generar la imagen a partir del texto
         image_model = genai.GenerativeModel('gemini-2.5-pro')
         prompt_para_imagen = (
             f"Crea una imagen artística, de alta calidad, surrealista y de ensueño basada en esta frase: '{dream_text}'. "
@@ -83,11 +85,19 @@ async def dream_task(channel: discord.TextChannel = None):
         )
         image_response = await image_model.generate_content_async(prompt_para_imagen)
         
-        if not image_response.parts:
-            print("❌ Gemini no devolvió una imagen para el sueño.")
+        # --- VERIFICACIÓN DE LA IMAGEN ---
+        try:
+            # Intentamos acceder a los datos de la imagen de forma segura
+            image_data = image_response.parts[0].inline_data.data
+        except (IndexError, AttributeError, ValueError):
+            # Si falla, es porque la API no devolvió una imagen válida.
+            print("❌ Gemini no devolvió una imagen válida. La respuesta fue:")
+            print(image_response.text) # Imprimimos la respuesta de texto para ver por qué falló
+            if channel:
+                await channel.send(f"Lo siento, no pude generar una imagen para el sueño: '{dream_text}'. La IA pudo haber bloqueado la solicitud.")
             return
+        # --- FIN DE LA VERIFICACIÓN ---
 
-        image_data = image_response.parts[0].inline_data.data
         image_file = discord.File(io.BytesIO(image_data), filename="sueño.png")
 
         target_channel = channel or bot.get_channel(DREAM_CHANNEL_ID)
@@ -96,7 +106,7 @@ async def dream_task(channel: discord.TextChannel = None):
             await target_channel.send(f"> {dream_text}", file=image_file)
             print(f"😴 El bot ha soñado: {dream_text}")
         else:
-            print(f"❌ No se encontró el canal de sueños con ID: {DREAM_CHANNEL_ID}")
+            print(f"❌ No se encontró el canal de sueños.")
     except Exception as e:
         print(f"Error durante el sueño del bot: {e}")
 
