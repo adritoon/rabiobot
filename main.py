@@ -79,7 +79,7 @@ async def dream_task(channel: discord.TextChannel = None):
     print("🌙 El bot está intentando soñar...")
     try:
         # PASO 1: Generar texto con la librería 'google-generativeai'
-        text_model = genai.GenerativeModel('gemini-1.5-pro')
+        text_model = genai.GenerativeModel('gemini-2.5-pro')
         prompt_para_texto = "Escribe una única frase muy corta (menos de 15 palabras) que sea poética, surrealista y misteriosa..."
         text_response = await text_model.generate_content_async(prompt_para_texto)
         dream_text = text_response.text.strip().replace('*', '')
