@@ -71,13 +71,14 @@ async def dream_task(channel: discord.TextChannel = None):
         print("❌ El bot no puede soñar sin una API Key de Gemini.")
         return
     try:
-        # 1. Generar el texto poético
+        # 1. Generar el texto poético (tu estructura preferida)
         text_model = genai.GenerativeModel('gemini-2.5-pro')
         prompt_para_texto = "Escribe una única frase muy corta (menos de 15 palabras) que sea poética, surrealista y misteriosa, como el sueño de una inteligencia artificial."
         text_response = await text_model.generate_content_async(prompt_para_texto)
         dream_text = text_response.text.strip().replace('*', '')
+        print(f"Texto del sueño generado: '{dream_text}'")
 
-        # 2. Generar la imagen a partir del texto
+        # 2. Generar la imagen a partir del texto (tu estructura preferida)
         image_model = genai.GenerativeModel('gemini-2.5-flash-image')
         prompt_para_imagen = (
             f"Crea una imagen artística, de alta calidad, surrealista y de ensueño basada en esta frase: '{dream_text}'. "
@@ -85,18 +86,27 @@ async def dream_task(channel: discord.TextChannel = None):
         )
         image_response = await image_model.generate_content_async(prompt_para_imagen)
         
-        # --- VERIFICACIÓN DE LA IMAGEN ---
+        # --- INSPECCIÓN PROFUNDA DE LA RESPUESTA ---
+        print("--- Respuesta completa de la API de imagen ---")
+        print(image_response) # Imprimimos la respuesta completa para analizarla
+        print("---------------------------------------------")
+
+        # Intentamos acceder a los datos de la imagen de forma segura
         try:
-            # Intentamos acceder a los datos de la imagen de forma segura
             image_data = image_response.parts[0].inline_data.data
-        except (IndexError, AttributeError, ValueError):
-            # Si falla, es porque la API no devolvió una imagen válida.
-            print("❌ Gemini no devolvió una imagen válida. La respuesta fue:")
-            print(image_response.text) # Imprimimos la respuesta de texto para ver por qué falló
+            if not image_data: # Verificamos si los datos están vacíos
+                raise ValueError("Los datos de la imagen están vacíos.")
+        except (IndexError, AttributeError, ValueError) as e:
+            print(f"❌ Error al extraer la imagen: {e}. Es probable que la solicitud haya sido bloqueada por filtros de seguridad.")
             if channel:
-                await channel.send(f"Lo siento, no pude generar una imagen para el sueño: '{dream_text}'. La IA pudo haber bloqueado la solicitud.")
+                # Intentamos obtener la razón del bloqueo si está disponible
+                try:
+                    block_reason = image_response.prompt_feedback.block_reason.name
+                    await channel.send(f"Lo siento, no pude generar una imagen. Razón del bloqueo: **{block_reason}**.")
+                except:
+                    await channel.send("Lo siento, la IA no generó una imagen válida, probablemente por sus filtros de seguridad.")
             return
-        # --- FIN DE LA VERIFICACIÓN ---
+        # --- FIN DE LA INSPECCIÓN ---
 
         image_file = discord.File(io.BytesIO(image_data), filename="sueño.png")
 
