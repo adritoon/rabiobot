@@ -11,6 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import time
 
+
 # --- 1. CARGA DE CONFIGURACIÓN Y TOKEN ---
 from config import (
     VOICE_CHANNEL_ID,
@@ -22,6 +23,9 @@ from config import (
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+genai.configure(api_key=GEMINI_API_KEY)
+for model in genai.list_models():
+    print(model.name)
 # Configura la API de Gemini
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
