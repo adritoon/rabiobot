@@ -94,19 +94,10 @@ async def dream_task(channel: discord.TextChannel = None):
         image_url = image_url_match.group(1)
         print(f"🖼️ URL de imagen generada: {image_url}")
 
-        # Descargar la imagen desde el enlace
-        async with aiohttp.ClientSession() as session:
-            async with session.get(image_url) as resp:
-                if resp.status != 200:
-                    raise ValueError(f"No se pudo descargar la imagen: {resp.status}")
-                image_bytes = await resp.read()
-
-        # Enviar al canal de sueños
         target_channel = channel or bot.get_channel(DREAM_CHANNEL_ID)
         if target_channel:
-            image_file = discord.File(io.BytesIO(image_bytes), filename="sueño.png")
-            await target_channel.send(f"> {dream_text}", file=image_file)
-            print("😴 El bot ha soñado con éxito.")
+            await target_channel.send(f"> {dream_text}\n{image_url}")
+            print("😴 El bot ha soñado con éxito (usando URL directa).")
         else:
             print("❌ No se encontró el canal de sueños.")
 
