@@ -79,7 +79,7 @@ async def dream_task(channel: discord.TextChannel = None):
         print(f"Texto del sueño generado: '{dream_text}'")
 
         # 2. Generar la imagen a partir del texto (tu estructura preferida)
-        image_model = genai.GenerativeModel('gemini-2.5-flash-image')
+        image_model = genai.GenerativeModel('gemini-1.5-flash')
         prompt_para_imagen = (
             f"Crea una imagen artística, de alta calidad, surrealista y de ensueño basada en esta frase: '{dream_text}'. "
             "Estilo: pintura digital etérea, colores melancólicos, cinematográfico."
