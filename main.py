@@ -21,16 +21,10 @@ from config import (
     DREAM_CHANNEL_ID
 )
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 genai.configure(api_key=GEMINI_API_KEY)
 for model in genai.list_models():
     print(model.name)
-# Configura la API de Gemini
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-else:
-    print("⚠️ Advertencia: La API Key de Gemini no está configurada. El bot no podrá soñar.")
 
 # --- 2. CONFIGURACIÓN DE INTENTS DEL BOT ---
 intents = discord.Intents.default()
