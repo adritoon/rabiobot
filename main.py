@@ -1,3 +1,4 @@
+# main.py
 import discord
 from discord.ext import commands
 import asyncio
@@ -5,12 +6,15 @@ import os
 from gtts import gTTS
 import random
 import io
+import time
+
+# Importamos ambas librerías de Google
 import google.generativeai as genai
+from google.cloud import aiplatform
+from vertexai.vision_models import ImageGenerationModel
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-import time
-import re
-import aiohttp
 
 # --- 1. CARGA DE CONFIGURACIÓN Y TOKEN ---
 from config import (
@@ -21,17 +25,7 @@ from config import (
     DREAM_CHANNEL_ID
 )
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-
-# --- NUEVA CONFIGURACIÓN CORRECTA DE GEMINI ---  
-# Obtén tu ID de proyecto de la Google Cloud Console
-PROJECT_ID = "plucky-rarity-473620-v0"
-
-if PROJECT_ID:
-    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-    print("✅ La API de Gemini se ha inicializado con el proyecto de Vertex AI.")
-else:
-    print("⚠️ Advertencia: No se ha configurado un ID de proyecto. El bot no podrá soñar.")
-# --- FIN DE LA NUEVA CONFIGURACIÓN ---
+PROJECT_ID = "plucky-rarity-473620-v0" # Tu ID de proyecto
 
 # --- 2. CONFIGURACIÓN DE INTENTS DEL BOT ---
 intents = discord.Intents.default()
@@ -65,55 +59,59 @@ async def play_tts(voice_client, text, filename="tts.mp3"):
         print(f"Error en play_tts: {e}")
         if os.path.exists(filename): os.remove(filename)
 
+# --- Función bloqueante para la generación de imagen ---
+def generate_image_blocking(prompt):
+    """
+    Esta función contiene el trabajo pesado y síncrono de generar la imagen.
+    Se ejecutará en un hilo separado para no congelar el bot.
+    """
+    try:
+        aiplatform.init(project=PROJECT_ID)
+        model = ImageGenerationModel.from_pretrained("imagegeneration@006")
+        response = model.generate_images(prompt=prompt, number_of_images=1)
+        return response.images[0]._image_bytes
+    except Exception as e:
+        print(f"Error en el hilo de generación de imagen: {e}")
+        return None
+
 async def dream_task(channel: discord.TextChannel = None):
     """La tarea programada que hace que el bot 'sueñe'."""
     print("🌙 El bot está intentando soñar...")
     try:
-        # --- PASO 1: Usamos un modelo de TEXTO que ya sabemos que funciona ---
-        text_model = genai.GenerativeModel('gemini-pro-latest')
-        prompt_para_texto = (
-            "Escribe una única frase muy corta (menos de 15 palabras) "
-            "que sea poética, surrealista y misteriosa, como el sueño de una inteligencia artificial."
-        )
+        # PASO 1: Generar texto con la librería 'google-generativeai'
+        text_model = genai.GenerativeModel('gemini-1.5-pro')
+        prompt_para_texto = "Escribe una única frase muy corta (menos de 15 palabras) que sea poética, surrealista y misteriosa..."
         text_response = await text_model.generate_content_async(prompt_para_texto)
         dream_text = text_response.text.strip().replace('*', '')
         print(f"Texto del sueño generado: '{dream_text}'")
 
-        # --- PASO 2: Usamos un modelo de IMAGEN dedicado ---
-        image_model = genai.GenerativeModel('models/imagen-4.0-generate-001')
-        
+        # PASO 2: Generar imagen en un hilo separado con la librería 'google-cloud-aiplatform'
         prompt_para_imagen = (
             f"Una imagen artística, de alta calidad, surrealista y de ensueño basada en esta frase: '{dream_text}'. "
             "Estilo: pintura digital etérea, colores melancólicos, cinematográfico."
         )
         
-        image_response = await image_model.generate_content_async(prompt_para_imagen)
+        loop = asyncio.get_running_loop()
+        image_data = await loop.run_in_executor(
+            None, generate_image_blocking, prompt_para_imagen
+        )
 
-        # --- MANEJO DE ERRORES PARA DATOS DE IMAGEN DIRECTOS ---
-        try:
-            image_data = image_response.parts[0].inline_data.data
-            if not image_data:
-                raise ValueError("Los datos de la imagen están vacíos.")
-        except (IndexError, AttributeError, ValueError) as e:
-            print(f"❌ Error al extraer la imagen: {e}. Es probable que la solicitud haya sido bloqueada.")
-            print("--- Respuesta completa de la API de imagen ---")
-            print(image_response) # Imprimimos la respuesta para ver por qué falló
-            print("---------------------------------------------")
-            if channel:
-                await channel.send("Lo siento, la IA no generó una imagen válida o fue bloqueada por filtros de seguridad.")
-            return
+        if not image_data:
+            raise ValueError("La generación de imagen no devolvió datos.")
 
         image_file = discord.File(io.BytesIO(image_data), filename="sueño.png")
         target_channel = channel or bot.get_channel(DREAM_CHANNEL_ID)
 
         if target_channel:
             await target_channel.send(f"> {dream_text}", file=image_file)
-            print(f"😴 El bot ha soñado con éxito.")
+            print("😴 El bot ha soñado con éxito.")
         else:
             print("❌ No se encontró el canal de sueños.")
 
     except Exception as e:
         print(f"Error durante el sueño del bot: {e}")
+        if channel:
+            await channel.send("Lo siento, hubo un error al intentar soñar.")
 
 # --- 5. EVENTOS PRINCIPALES DEL BOT ---
 @bot.event
@@ -127,7 +125,6 @@ async def on_ready():
             print(f'🔗 Conectado a {voice_channel.name}.')
             bot_is_ready = True
             
-            # El programador se inicia siempre. La función dream_task verificará si puede correr.
             scheduler = AsyncIOScheduler(timezone="America/Lima")
             trigger = CronTrigger(hour=3, minute=0, jitter=7200)
             scheduler.add_job(dream_task, trigger)
@@ -209,7 +206,6 @@ async def on_message(message):
 @bot.slash_command(name="test_dream", description="Fuerza al bot a soñar ahora mismo para pruebas.")
 @commands.is_owner()
 async def test_dream(ctx: discord.ApplicationContext):
-    """Ejecuta la tarea del sueño manualmente."""
     await ctx.defer(ephemeral=True)
     print(f"--- Forzando un sueño por orden de {ctx.author.name} ---")
     await dream_task(channel=ctx.channel)
