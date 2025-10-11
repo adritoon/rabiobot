@@ -60,7 +60,7 @@ async def play_tts(voice_client, text, filename="tts.mp3"):
         print(f"Error en play_tts: {e}")
         if os.path.exists(filename): os.remove(filename)
 
-async def dream_task():
+async def dream_task(channel: discord.TextChannel = None):
     """La tarea programada que hace que el bot 'sueñe'."""
     print("🌙 El bot está intentando soñar...")
     if not GEMINI_API_KEY:
@@ -79,12 +79,17 @@ async def dream_task():
         )
         image_response = await image_model.generate_content_async(prompt_para_imagen)
         
+        if not image_response.parts:
+            print("❌ Gemini no devolvió una imagen para el sueño.")
+            return
+
         image_data = image_response.parts[0].inline_data.data
         image_file = discord.File(io.BytesIO(image_data), filename="sueño.png")
 
-        dream_channel = bot.get_channel(DREAM_CHANNEL_ID)
-        if dream_channel:
-            await dream_channel.send(f"> {dream_text}", file=image_file)
+        target_channel = channel or bot.get_channel(DREAM_CHANNEL_ID)
+        
+        if target_channel:
+            await target_channel.send(f"> {dream_text}", file=image_file)
             print(f"😴 El bot ha soñado: {dream_text}")
         else:
             print(f"❌ No se encontró el canal de sueños con ID: {DREAM_CHANNEL_ID}")
@@ -182,6 +187,21 @@ async def on_message(message):
     await bot.process_application_commands(message)
 
 # --- 6. COMANDOS SLASH ---
+@bot.slash_command(name="test_dream", description="Fuerza al bot a soñar ahora mismo para pruebas.")
+@commands.is_owner() # Opcional: solo tú podrás usar este comando
+async def test_dream(ctx: discord.ApplicationContext):
+    """Ejecuta la tarea del sueño manualmente."""
+    await ctx.defer(ephemeral=True)
+    print(f"--- Forzando un sueño por orden de {ctx.author.name} ---")
+    await dream_task(channel=ctx.channel) # Llama a la función y le pasa el canal actual
+    await ctx.followup.send("Intento de sueño completado. Revisa la consola para ver los logs.")
+
+# Opcional: Añade un manejador de error si no eres el dueño
+@test_dream.error
+async def test_dream_error(ctx, error):
+    if isinstance(error, commands.NotOwner):
+        await ctx.respond("⛔ Solo el dueño del bot puede usar este comando.", ephemeral=True)
+
 @bot.slash_command(name="ping", description="Verifica la latencia del bot.")
 async def ping(ctx: discord.ApplicationContext):
     await ctx.respond(f"¡Pong! 🏓 Latencia: {round(bot.latency * 1000)}ms", ephemeral=True)
