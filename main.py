@@ -71,7 +71,7 @@ async def dream_task(channel: discord.TextChannel = None):
         print("❌ El bot no puede soñar sin una API Key de Gemini.")
         return
     try:
-        # --- PASO 1: Usamos un modelo de TEXTO estable de tu lista ---
+        # --- PASO 1: Usamos un modelo de TEXTO que ya sabemos que funciona ---
         text_model = genai.GenerativeModel('gemini-pro-latest')
         prompt_para_texto = (
             "Escribe una única frase muy corta (menos de 15 palabras) "
@@ -81,8 +81,8 @@ async def dream_task(channel: discord.TextChannel = None):
         dream_text = text_response.text.strip().replace('*', '')
         print(f"Texto del sueño generado: '{dream_text}'")
 
-        # --- PASO 2: Usamos un modelo de IMAGEN dedicado de tu lista ---
-        image_model = genai.GenerativeModel('models/imagen-4.0-generate-001')
+        # --- PASO 2: Usamos un modelo de IMAGEN de la familia GEMINI de tu lista ---
+        image_model = genai.GenerativeModel('models/gemini-2.5-flash-image')
         
         prompt_para_imagen = (
             f"Una imagen artística, de alta calidad, surrealista y de ensueño basada en esta frase: '{dream_text}'. "
@@ -91,7 +91,7 @@ async def dream_task(channel: discord.TextChannel = None):
         
         image_response = await image_model.generate_content_async(prompt_para_imagen)
 
-        # --- INSPECCIÓN Y MANEJO DE LA RESPUESTA ---
+        # --- INSPECCIÓN DE RESPUESTA ---
         try:
             image_data = image_response.parts[0].inline_data.data
             if not image_data:
