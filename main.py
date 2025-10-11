@@ -25,7 +25,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 PROJECT_ID = "plucky-rarity-473620-v0"
 
 if PROJECT_ID:
-    genai.init(project=PROJECT_ID)
+    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
     print("✅ La API de Gemini se ha inicializado con el proyecto de Vertex AI.")
 else:
     print("⚠️ Advertencia: No se ha configurado un ID de proyecto. El bot no podrá soñar.")
