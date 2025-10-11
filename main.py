@@ -22,10 +22,6 @@ from config import (
 )
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
-genai.configure(api_key=GEMINI_API_KEY)
-for model in genai.list_models():
-    print(model.name)
-
 # --- 2. CONFIGURACIÓN DE INTENTS DEL BOT ---
 intents = discord.Intents.default()
 intents.guilds = True
