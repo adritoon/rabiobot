@@ -72,7 +72,7 @@ async def dream_task(channel: discord.TextChannel = None):
         return
     try:
         # --- PASO 1: Usamos un modelo de texto para la frase ---
-        text_model = genai.GenerativeModel('gemini-1.5-pro')
+        text_model = genai.GenerativeModel('gemini-2.5-pro')
         prompt_para_texto = (
             "Escribe una única frase muy corta (menos de 15 palabras) "
             "que sea poética, surrealista y misteriosa, como el sueño de una inteligencia artificial."
