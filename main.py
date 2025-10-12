@@ -117,8 +117,8 @@ async def dream_task(channel: discord.TextChannel = None):
 
 async def get_lima_photo_of_the_day():
     """
-    Busca una foto reciente de Lima, la descarga y genera un caption.
-    Implementa todas tus sugerencias.
+    Busca una foto reciente de Lima, la descarga y genera un caption poético.
+    Incluye filtros de dominios y validación de imagen.
     """
     print("📸 Buscando la foto del día de Lima...")
     serpapi_key = os.getenv("SERPAPI_KEY")
@@ -127,48 +127,64 @@ async def get_lima_photo_of_the_day():
         return None, None, None
 
     try:
-        # --- 1. La Búsqueda (tu query) ---
         params = {
-            "q": '"Lima Perú" (site:instagram.com OR site:x.com OR site:flickr.com)',
+            "q": '"Lima Perú" (site:instagram.com OR site:x.com OR site:flickr.com OR site:unsplash.com)',
             "tbm": "isch",
-            "tbs": "qdr:d", # Últimas 24 horas
+            "tbs": "qdr:d",
             "api_key": serpapi_key
         }
         search = GoogleSearch(params)
         results = search.get_dict()
         
-        # --- 2. Selección Inteligente de Imagen (tu lógica) ---
-        valid_images = [img for img in results.get("images_results", []) if "original" in img]
-        if not valid_images:
-            print("❌ No se encontraron imágenes válidas recientes.")
+        if "images_results" not in results or not results["images_results"]:
+            print("❌ No se encontraron imágenes recientes.")
             return None, None, None
 
-        choice = random.choice(valid_images[:5]) # Elige entre las 5 primeras
-        image_url = choice["original"]
-        source_link = choice.get("link") or choice.get("source") # Para el crédito
-        print(f"🖼️ Descargando imagen desde: {image_url}")
+        blocked_domains = ["lookaside.instagram.com", "x.com", "pbs.twimg.com", "facebook.com", "tiktok.com"]
 
-        # --- 3. Descarga de la Imagen ---
-        async with aiohttp.ClientSession() as session:
-            async with session.get(image_url) as resp:
-                if resp.status != 200:
-                    raise ValueError(f"No se pudo descargar: {resp.status}")
-                image_bytes = await resp.read()
+        for image_result in results["images_results"]:
+            image_url = image_result.get("original") or image_result.get("thumbnail")
+            if not image_url or any(b in image_url for b in blocked_domains):
+                print(f"⏭️ Omitiendo URL no válida: {image_url}")
+                continue
 
-        # --- 4. Generación del Caption con Gemini ---
-        # Compatibilidad de formato (tu lógica)
-        mime_type = "image/jpeg"
-        if image_url.endswith(".png"): mime_type = "image/png"
-        elif image_url.endswith(".webp"): mime_type = "image/webp"
-        
-        model = genai.GenerativeModel('gemini-2.5-pro')
-        prompt_caption = "Basado en esta imagen de Lima, escribe una única frase poética y evocadora (menos de 15 palabras) que capture su esencia."
-        image_part = {"mime_type": mime_type, "data": image_bytes}
-        response = await model.generate_content_async([prompt_caption, image_part])
-        caption = response.text.strip().replace('*', '')
-        print(f"✒️ Caption generado: '{caption}'")
+            source_link = image_result.get("link") or image_result.get("source")
+            print(f"🖼️ Intentando descargar imagen: {image_url}")
 
-        return image_bytes, caption, source_link
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(image_url, timeout=10) as resp:
+                        if resp.status == 200:
+                            image_bytes = await resp.read()
+
+                            import imghdr
+                            kind = imghdr.what(None, h=image_bytes)
+                            if not kind:
+                                print("⚠️ El archivo descargado no es una imagen válida.")
+                                continue
+
+                            mime_type = f"image/{kind}"
+
+                            # --- Generación del Caption con Gemini ---
+                            model = genai.GenerativeModel('gemini-1.5-pro')
+                            prompt_caption = (
+                                "Mira esta imagen de Lima. Escribe una frase poética breve (menos de 15 palabras) "
+                                "que capture su atmósfera o sentimiento, sin usar comillas ni emojis."
+                            )
+
+                            image_part = {"mime_type": mime_type, "data": image_bytes}
+                            response = await model.generate_content_async([prompt_caption, image_part])
+                            caption = response.text.strip().replace('*', '')
+
+                            print(f"✒️ Caption generado: '{caption}'")
+                            return image_bytes, caption, source_link
+                        else:
+                            print(f"⚠️ Falló la descarga de {image_url} con estado: {resp.status}")
+            except Exception as e:
+                print(f"⚠️ Error al procesar la URL {image_url}: {e}")
+
+        print("❌ No se pudo descargar ninguna imagen válida.")
+        return None, None, None
 
     except Exception as e:
         print(f"Error en get_lima_photo_of_the_day: {e}")
