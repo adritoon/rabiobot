@@ -7,6 +7,8 @@ from gtts import gTTS
 import random
 import io
 import time
+from serpapi import GoogleSearch
+import aiohttp
 
 # Importamos ambas librerías de Google
 import google.generativeai as genai
@@ -113,6 +115,78 @@ async def dream_task(channel: discord.TextChannel = None):
         if channel:
             await channel.send("Lo siento, hubo un error al intentar soñar.")
 
+async def get_lima_photo_of_the_day():
+    """
+    Busca una foto reciente de Lima, la descarga y genera un caption.
+    Implementa todas tus sugerencias.
+    """
+    print("📸 Buscando la foto del día de Lima...")
+    serpapi_key = os.getenv("SERPAPI_KEY")
+    if not serpapi_key:
+        print("❌ Falta la variable de entorno SERPAPI_KEY.")
+        return None, None, None
+
+    try:
+        # --- 1. La Búsqueda (tu query) ---
+        params = {
+            "q": '"Lima Perú" (site:instagram.com OR site:x.com OR site:flickr.com)',
+            "tbm": "isch",
+            "tbs": "qdr:d", # Últimas 24 horas
+            "api_key": serpapi_key
+        }
+        search = GoogleSearch(params)
+        results = search.get_dict()
+        
+        # --- 2. Selección Inteligente de Imagen (tu lógica) ---
+        valid_images = [img for img in results.get("images_results", []) if "original" in img]
+        if not valid_images:
+            print("❌ No se encontraron imágenes válidas recientes.")
+            return None, None, None
+
+        choice = random.choice(valid_images[:5]) # Elige entre las 5 primeras
+        image_url = choice["original"]
+        source_link = choice.get("link") or choice.get("source") # Para el crédito
+        print(f"🖼️ Descargando imagen desde: {image_url}")
+
+        # --- 3. Descarga de la Imagen ---
+        async with aiohttp.ClientSession() as session:
+            async with session.get(image_url) as resp:
+                if resp.status != 200:
+                    raise ValueError(f"No se pudo descargar: {resp.status}")
+                image_bytes = await resp.read()
+
+        # --- 4. Generación del Caption con Gemini ---
+        # Compatibilidad de formato (tu lógica)
+        mime_type = "image/jpeg"
+        if image_url.endswith(".png"): mime_type = "image/png"
+        elif image_url.endswith(".webp"): mime_type = "image/webp"
+        
+        model = genai.GenerativeModel('gemini-2.5-pro')
+        prompt_caption = "Basado en esta imagen de Lima, escribe una única frase poética y evocadora (menos de 15 palabras) que capture su esencia."
+        image_part = {"mime_type": mime_type, "data": image_bytes}
+        response = await model.generate_content_async([prompt_caption, image_part])
+        caption = response.text.strip().replace('*', '')
+        print(f"✒️ Caption generado: '{caption}'")
+
+        return image_bytes, caption, source_link
+
+    except Exception as e:
+        print(f"Error en get_lima_photo_of_the_day: {e}")
+        return None, None, None
+
+# --- Función para la Automatización (tu lógica) ---
+async def post_lima_photo_auto():
+    """Función que se ejecutará automáticamente cada día."""
+    channel = bot.get_channel(LIMA_PHOTO_CHANNEL_ID)
+    if not channel:
+        print(f"❌ No se encontró el canal para la foto de Lima con ID: {LIMA_PHOTO_CHANNEL_ID}")
+        return
+    
+    image_data, caption, source = await get_lima_photo_of_the_day()
+    if image_data and caption:
+        image_file = discord.File(io.BytesIO(image_data), filename="lima_hoy.jpg")
+        await channel.send(content=f"> {caption}\n📸 Fuente: <{source}>", file=image_file)
+
 # --- 5. EVENTOS PRINCIPALES DEL BOT ---
 @bot.event
 async def on_ready():
@@ -128,8 +202,10 @@ async def on_ready():
             scheduler = AsyncIOScheduler(timezone="America/Lima")
             trigger = CronTrigger(hour=3, minute=0, jitter=7200)
             scheduler.add_job(dream_task, trigger)
+            photo_trigger = CronTrigger(hour=19, minute=30, timezone="America/Lima")
+            scheduler.add_job(post_lima_photo_auto, photo_trigger)
             scheduler.start()
-            print("⏰ El programador de sueños está activo.")
+            print("⏰ El programador de sueños y de la foto de Lima están activos.")
         except Exception as e:
             print(f'❌ Error durante la conexión inicial: {e}')
 
@@ -255,6 +331,18 @@ async def unfollowme(ctx: discord.ApplicationContext):
         print(f"⏹️ El bot ha dejado de seguir a {ctx.author.display_name}.")
     else:
         await ctx.respond("El bot no te está siguiendo.", ephemeral=True)
+
+@bot.slash_command(name="lima_de_hoy", description="Busca y muestra una foto reciente de Lima.")
+@commands.is_owner() # Es buena idea restringirlo para no gastar la cuota de la API
+async def lima_de_hoy(ctx: discord.ApplicationContext):
+    await ctx.defer()
+    image_data, caption, source = await get_lima_photo_of_the_day()
+    
+    if image_data and caption:
+        image_file = discord.File(io.BytesIO(image_data), filename="lima_hoy.jpg")
+        await ctx.followup.send(content=f"> {caption}\n📸 Fuente: <{source}>", file=image_file)
+    else:
+        await ctx.followup.send("Lo siento, no pude encontrar una foto de Lima hoy.")
 
 # --- 7. EJECUCIÓN DEL BOT ---
 if __name__ == "__main__":

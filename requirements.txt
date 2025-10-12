@@ -4,3 +4,4 @@ gTTS==2.3.2
 google-generativeai
 apscheduler
 Pillow
+google-search-results

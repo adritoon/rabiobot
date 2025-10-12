@@ -19,3 +19,6 @@ FOLLOWME_EXEMPT_USER_ID = 335926762582179841 # Reemplaza con el ID real
 MEMENTO_CHANNEL_ID = 1425867691725688914 # Reemplaza con el ID de tu canal #mementos
 
 DREAM_CHANNEL_ID = 1426470503710720031
+
+# --- Configuración de la Foto del Día de Lima ---
+LIMA_PHOTO_CHANNEL_ID = 1355955093010252019 # ID del canal para la foto automática
