@@ -121,13 +121,13 @@ async def dream_task(channel: discord.TextChannel = None):
 async def get_lima_photo_of_the_day():
     """
     Busca una página con una foto de Lima y extrae la imagen real
-    desde el código HTML de la página.
+    desde el código HTML de la página. (Versión sin Gemini)
     """
     print("📸 Buscando la foto del día de Lima...")
     serpapi_key = os.getenv("SERPAPI_KEY")
     if not serpapi_key:
         print("❌ Falta la variable de entorno SERPAPI_KEY.")
-        return None, None, None
+        return None, None
 
     try:
         params = {
@@ -141,69 +141,54 @@ async def get_lima_photo_of_the_day():
         
         if "images_results" not in results or not results["images_results"]:
             print("❌ No se encontraron imágenes recientes.")
-            return None, None, None
+            return None, None
 
         random.shuffle(results["images_results"])
 
         for image_result in results["images_results"]:
-            page_url = image_result.get("link") # Obtenemos la URL de la PÁGINA
+            page_url = image_result.get("link")
             if not page_url:
                 continue
 
             print(f"📄 Analizando página: {page_url}")
-
             try:
-                # --- PASO 1: Descargar el HTML de la página ---
                 async with aiohttp.ClientSession() as session:
                     async with session.get(page_url, timeout=15) as resp:
                         if resp.status != 200:
-                            print(f"⚠️ No se pudo acceder a la página con estado: {resp.status}")
                             continue
                         html_content = await resp.text()
 
-                # --- PASO 2: "Entrar" a la página y buscar la imagen real ---
                 soup = BeautifulSoup(html_content, 'html.parser')
-                # La etiqueta 'og:image' es la más fiable para encontrar la imagen principal
                 meta_tag = soup.find('meta', property='og:image')
                 
                 if not meta_tag or not meta_tag.get('content'):
-                    print("⏭️ No se encontró la etiqueta de imagen principal en la página.")
                     continue
                 
                 real_image_url = meta_tag['content']
                 print(f"🖼️ Encontrada URL de imagen real: {real_image_url}")
 
-                # --- PASO 3: Descargar la imagen real ---
                 async with aiohttp.ClientSession() as session:
                     async with session.get(real_image_url, timeout=15) as img_resp:
                         if img_resp.status != 200:
-                            print(f"⚠️ Falló la descarga de la imagen real con estado: {img_resp.status}")
                             continue
                         image_bytes = await img_resp.read()
 
-                # Validación con Pillow y generación de caption (sin cambios)
+                # Verificamos que sea una imagen antes de devolverla
                 with Image.open(io.BytesIO(image_bytes)) as img:
                     img.verify()
-                    mime_type = f"image/{img.format.lower()}"
                 
-                model = genai.GenerativeModel('gemini-1.5-pro')
-                prompt_caption = "Basado en esta imagen de Lima, escribe una frase poética breve..."
-                image_part = {"mime_type": mime_type, "data": image_bytes}
-                response = await model.generate_content_async([prompt_caption, image_part])
-                caption = response.text.strip().replace('*', '')
-
-                print(f"✒️ Caption generado: '{caption}'")
-                return image_bytes, caption, page_url # Devolvemos la URL de la página como fuente
+                print("✅ Imagen descargada y validada exitosamente.")
+                return image_bytes, page_url # Devolvemos solo la imagen y la fuente
 
             except Exception as e:
                 print(f"⚠️ Error al procesar la página {page_url}: {e}")
 
         print("❌ No se pudo extraer ninguna imagen válida de los resultados.")
-        return None, None, None
+        return None, None
 
     except Exception as e:
         print(f"Error en get_lima_photo_of_the_day: {e}")
-        return None, None, None
+        return None, None
 
 # --- Función para la Automatización (tu lógica) ---
 async def post_lima_photo_auto():
@@ -391,14 +376,17 @@ async def unfollowme(ctx: discord.ApplicationContext):
         await ctx.respond("El bot no te está siguiendo.", ephemeral=True)
 
 @bot.slash_command(name="lima_de_hoy", description="Busca y muestra una foto reciente de Lima.")
-@commands.is_owner() # Es buena idea restringirlo para no gastar la cuota de la API
+@commands.is_owner()
 async def lima_de_hoy(ctx: discord.ApplicationContext):
     await ctx.defer()
-    image_data, caption, source = await get_lima_photo_of_the_day()
     
-    if image_data and caption:
+    # La función ahora solo devuelve la imagen y la fuente
+    image_data, source = await get_lima_photo_of_the_day()
+    
+    if image_data:
         image_file = discord.File(io.BytesIO(image_data), filename="lima_hoy.jpg")
-        await ctx.followup.send(content=f"> {caption}\n📸 Fuente: <{source}>", file=image_file)
+        # Usamos un caption simple y genérico
+        await ctx.followup.send(content=f"> Foto del día de Lima:\n📸 Fuente: <{source}>", file=image_file)
     else:
         await ctx.followup.send("Lo siento, no pude encontrar una foto de Lima hoy.")
 
