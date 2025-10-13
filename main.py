@@ -120,8 +120,8 @@ async def dream_task(channel: discord.TextChannel = None):
 
 async def get_lima_photo_of_the_day():
     """
-    Busca una página con una foto de Lima y extrae la imagen real
-    desde el código HTML de la página. (Versión sin Gemini)
+    Busca una foto reciente de Lima, extrae la imagen real y ahora
+    valida que la fecha del resultado sea realmente reciente.
     """
     print("📸 Buscando la foto del día de Lima...")
     serpapi_key = os.getenv("SERPAPI_KEY")
@@ -140,50 +140,55 @@ async def get_lima_photo_of_the_day():
         results = search.get_dict()
         
         if "images_results" not in results or not results["images_results"]:
-            print("❌ No se encontraron imágenes recientes.")
+            print("❌ No se encontraron imágenes.")
             return None, None
 
         random.shuffle(results["images_results"])
 
         for image_result in results["images_results"]:
+            
+            # --- NUEVA VALIDACIÓN DE FECHA ---
+            date_info = image_result.get("date", "").lower()
+            if not date_info or ("hace" not in date_info and "yesterday" not in date_info):
+                print(f"⏭️ Omitiendo imagen por no ser reciente. Fecha encontrada: '{date_info}'")
+                continue
+            # --- FIN DE LA VALIDACIÓN ---
+
             page_url = image_result.get("link")
             if not page_url:
                 continue
 
-            print(f"📄 Analizando página: {page_url}")
+            print(f"📄 Analizando página reciente: {page_url}")
             try:
+                # ... (el resto de la lógica de descarga y análisis con BeautifulSoup y Pillow no cambia)
                 async with aiohttp.ClientSession() as session:
                     async with session.get(page_url, timeout=15) as resp:
-                        if resp.status != 200:
-                            continue
+                        if resp.status != 200: continue
                         html_content = await resp.text()
-
+                
                 soup = BeautifulSoup(html_content, 'html.parser')
                 meta_tag = soup.find('meta', property='og:image')
-                
-                if not meta_tag or not meta_tag.get('content'):
-                    continue
+                if not meta_tag or not meta_tag.get('content'): continue
                 
                 real_image_url = meta_tag['content']
                 print(f"🖼️ Encontrada URL de imagen real: {real_image_url}")
 
                 async with aiohttp.ClientSession() as session:
                     async with session.get(real_image_url, timeout=15) as img_resp:
-                        if img_resp.status != 200:
-                            continue
+                        if img_resp.status != 200: continue
                         image_bytes = await img_resp.read()
 
-                # Verificamos que sea una imagen antes de devolverla
                 with Image.open(io.BytesIO(image_bytes)) as img:
                     img.verify()
                 
                 print("✅ Imagen descargada y validada exitosamente.")
-                return image_bytes, page_url # Devolvemos solo la imagen y la fuente
+                # Como ya no tenemos el caption de Gemini, devolvemos solo la imagen y la fuente
+                return image_bytes, page_url
 
             except Exception as e:
                 print(f"⚠️ Error al procesar la página {page_url}: {e}")
 
-        print("❌ No se pudo extraer ninguna imagen válida de los resultados.")
+        print("❌ No se pudo extraer ninguna imagen válida de los resultados recientes.")
         return None, None
 
     except Exception as e:
