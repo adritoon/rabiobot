@@ -8,6 +8,7 @@ import random
 import io
 import time
 from serpapi import GoogleSearch
+import re
 import aiohttp
 
 # Importamos ambas librerías de Google
@@ -275,23 +276,50 @@ async def on_voice_state_update(member, before, after):
 
 @bot.event
 async def on_message(message):
-    if message.author.bot or not message.guild: return
+    if message.author.bot or not message.guild:
+        # Procesamos los comandos slash incluso si el resto se ignora
+        await bot.process_application_commands(message)
+        return
+
+    # --- NUEVA LÓGICA DE FILTRADO ---
+    # 1. Si el mensaje no tiene texto pero sí tiene archivos, lo ignoramos.
+    if not message.content and message.attachments:
+        print("⏭️ Omitiendo mensaje que solo contiene un archivo adjunto.")
+        await bot.process_application_commands(message)
+        return
+
+    # 2. Limpiamos cualquier URL del contenido del mensaje.
+    text_to_read = re.sub(r'https?://\S+', '', message.content).strip()
+    
+    # 3. Si después de limpiar no queda nada que leer, lo ignoramos.
+    if not text_to_read:
+        print("⏭️ Omitiendo mensaje que solo contenía una URL.")
+        await bot.process_application_commands(message)
+        return
+    # --- FIN DE LA NUEVA LÓGICA ---
+
     voice_client = discord.utils.get(bot.voice_clients, guild=message.guild)
     if not voice_client:
         await bot.process_application_commands(message)
         return
-    text_to_speak, should_speak = message.content, False
+
+    should_speak = False
     is_bridge_message = (tts_bridge_enabled and message.channel.id == TTS_BRIDGE_CHANNEL_ID and discord.utils.get(message.author.roles, name=TTS_BRIDGE_ROLE_NAME))
     is_followed_user_message = message.author.id in followed_user_ids
+    
+    text_with_author = text_to_read # Usamos el texto ya limpiado
+
     if is_bridge_message:
-        text_to_speak = f"{message.author.display_name} dice: {text_to_speak}"
+        text_with_author = f"{message.author.display_name} dice: {text_to_read}"
         should_speak = True
     elif is_followed_user_message:
         if len(followed_user_ids) > 1 and message.author.id != FOLLOWME_EXEMPT_USER_ID:
-            text_to_speak = f"{message.author.display_name} dice: {text_to_speak}"
+            text_with_author = f"{message.author.display_name} dice: {text_to_read}"
         should_speak = True
+    
     if should_speak:
-        await play_tts(voice_client, text_to_speak, f"speech_{message.id}.mp3")
+        await play_tts(voice_client, text_with_author, f"speech_{message.id}.mp3")
+    
     await bot.process_application_commands(message)
 
 # --- 6. COMANDOS SLASH ---
