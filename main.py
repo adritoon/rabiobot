@@ -10,6 +10,8 @@ import time
 from serpapi import GoogleSearch
 import re
 import aiohttp
+from bs4 import BeautifulSoup
+from PIL import Image
 
 # Importamos ambas librerías de Google
 import google.generativeai as genai
@@ -118,8 +120,8 @@ async def dream_task(channel: discord.TextChannel = None):
 
 async def get_lima_photo_of_the_day():
     """
-    Busca una foto reciente de Lima, la descarga y genera un caption poético.
-    Incluye filtros de dominios y validación de imagen.
+    Busca una página con una foto de Lima y extrae la imagen real
+    desde el código HTML de la página.
     """
     print("📸 Buscando la foto del día de Lima...")
     serpapi_key = os.getenv("SERPAPI_KEY")
@@ -129,7 +131,7 @@ async def get_lima_photo_of_the_day():
 
     try:
         params = {
-            "q": '"Lima Perú" (site:instagram.com OR site:x.com OR site:flickr.com OR site:unsplash.com)',
+            "q": '"Lima Perú" (site:flickr.com OR site:unsplash.com OR site:instagram.com)',
             "tbm": "isch",
             "tbs": "qdr:d",
             "api_key": serpapi_key
@@ -141,50 +143,62 @@ async def get_lima_photo_of_the_day():
             print("❌ No se encontraron imágenes recientes.")
             return None, None, None
 
-        blocked_domains = ["lookaside.instagram.com", "x.com", "pbs.twimg.com", "facebook.com", "tiktok.com"]
+        random.shuffle(results["images_results"])
 
         for image_result in results["images_results"]:
-            image_url = image_result.get("original") or image_result.get("thumbnail")
-            if not image_url or any(b in image_url for b in blocked_domains):
-                print(f"⏭️ Omitiendo URL no válida: {image_url}")
+            page_url = image_result.get("link") # Obtenemos la URL de la PÁGINA
+            if not page_url:
                 continue
 
-            source_link = image_result.get("link") or image_result.get("source")
-            print(f"🖼️ Intentando descargar imagen: {image_url}")
+            print(f"📄 Analizando página: {page_url}")
 
             try:
+                # --- PASO 1: Descargar el HTML de la página ---
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(image_url, timeout=10) as resp:
-                        if resp.status == 200:
-                            image_bytes = await resp.read()
+                    async with session.get(page_url, timeout=15) as resp:
+                        if resp.status != 200:
+                            print(f"⚠️ No se pudo acceder a la página con estado: {resp.status}")
+                            continue
+                        html_content = await resp.text()
 
-                            import imghdr
-                            kind = imghdr.what(None, h=image_bytes)
-                            if not kind:
-                                print("⚠️ El archivo descargado no es una imagen válida.")
-                                continue
+                # --- PASO 2: "Entrar" a la página y buscar la imagen real ---
+                soup = BeautifulSoup(html_content, 'html.parser')
+                # La etiqueta 'og:image' es la más fiable para encontrar la imagen principal
+                meta_tag = soup.find('meta', property='og:image')
+                
+                if not meta_tag or not meta_tag.get('content'):
+                    print("⏭️ No se encontró la etiqueta de imagen principal en la página.")
+                    continue
+                
+                real_image_url = meta_tag['content']
+                print(f"🖼️ Encontrada URL de imagen real: {real_image_url}")
 
-                            mime_type = f"image/{kind}"
+                # --- PASO 3: Descargar la imagen real ---
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(real_image_url, timeout=15) as img_resp:
+                        if img_resp.status != 200:
+                            print(f"⚠️ Falló la descarga de la imagen real con estado: {img_resp.status}")
+                            continue
+                        image_bytes = await img_resp.read()
 
-                            # --- Generación del Caption con Gemini ---
-                            model = genai.GenerativeModel('gemini-1.5-pro')
-                            prompt_caption = (
-                                "Mira esta imagen de Lima. Escribe una frase poética breve (menos de 15 palabras) "
-                                "que capture su atmósfera o sentimiento, sin usar comillas ni emojis."
-                            )
+                # Validación con Pillow y generación de caption (sin cambios)
+                with Image.open(io.BytesIO(image_bytes)) as img:
+                    img.verify()
+                    mime_type = f"image/{img.format.lower()}"
+                
+                model = genai.GenerativeModel('gemini-1.5-pro')
+                prompt_caption = "Basado en esta imagen de Lima, escribe una frase poética breve..."
+                image_part = {"mime_type": mime_type, "data": image_bytes}
+                response = await model.generate_content_async([prompt_caption, image_part])
+                caption = response.text.strip().replace('*', '')
 
-                            image_part = {"mime_type": mime_type, "data": image_bytes}
-                            response = await model.generate_content_async([prompt_caption, image_part])
-                            caption = response.text.strip().replace('*', '')
+                print(f"✒️ Caption generado: '{caption}'")
+                return image_bytes, caption, page_url # Devolvemos la URL de la página como fuente
 
-                            print(f"✒️ Caption generado: '{caption}'")
-                            return image_bytes, caption, source_link
-                        else:
-                            print(f"⚠️ Falló la descarga de {image_url} con estado: {resp.status}")
             except Exception as e:
-                print(f"⚠️ Error al procesar la URL {image_url}: {e}")
+                print(f"⚠️ Error al procesar la página {page_url}: {e}")
 
-        print("❌ No se pudo descargar ninguna imagen válida.")
+        print("❌ No se pudo extraer ninguna imagen válida de los resultados.")
         return None, None, None
 
     except Exception as e:

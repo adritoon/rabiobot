@@ -5,3 +5,4 @@ google-generativeai
 apscheduler
 Pillow
 google-search-results
+beautifulsoup4
