@@ -6,6 +6,9 @@ import os
 from gtts import gTTS
 import time
 import re
+import subprocess
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 # --- 1. CARGA DE CONFIGURACIÓN Y TOKEN ---
 from config import (
@@ -31,8 +34,9 @@ followed_user_ids = set()
 bot_is_zombie = False
 bot_is_ready = False
 last_reconnect_attempt = 0
+restart_is_pending = False # Para el reinicio inteligente
 
-# --- 4. FUNCIÓN AUXILIAR PARA TEXT-TO-SPEECH (TTS) ---
+# --- 4. FUNCIONES AUXILIARES Y DE MANTENIMIENTO ---
 async def play_tts(voice_client, text, filename="tts.mp3"):
     if not voice_client or not voice_client.is_connected(): return
     try:
@@ -48,6 +52,40 @@ async def play_tts(voice_client, text, filename="tts.mp3"):
         print(f"Error en play_tts: {e}")
         if os.path.exists(filename): os.remove(filename)
 
+async def perform_restart(voice_client):
+    """Anuncia, lanza el script de reinicio y se apaga limpiamente."""
+    print("🚀 Iniciando secuencia de reinicio programado...")
+    try:
+        await play_tts(voice_client, "Iniciando reinicio programado para mantenimiento. Volveré en un momento.")
+        await asyncio.sleep(5)
+        
+        # Lanza restart.sh como un proceso completamente independiente
+        subprocess.Popen(['/home/robtete2024/rabiobot/restart.sh'])
+        
+        # Se apaga a sí mismo de forma limpia
+        print("Apagando el proceso actual para ceder el control al reiniciador...")
+        await bot.close()
+
+    except Exception as e:
+        print(f"❌ Error durante la secuencia de reinicio: {e}")
+
+async def scheduled_restart_check():
+    """Comprueba si se cumplen las condiciones para un reinicio."""
+    global restart_is_pending
+    print("⏰ Comprobando condiciones para el reinicio nocturno...")
+    
+    voice_client = bot.voice_clients[0] if bot.voice_clients else None
+
+    if voice_client and voice_client.is_connected():
+        # La condición es: bot + 2 usuarios = 3 o más miembros
+        if len(voice_client.channel.members) >= 3:
+            await perform_restart(voice_client)
+        else:
+            restart_is_pending = True
+            print("⏳ Reinicio pendiente. Esperando a que haya al menos 2 usuarios en el canal.")
+    else:
+        print("Bot no está en un canal de voz. Reinicio cancelado para hoy.")
+
 # --- 5. EVENTOS PRINCIPALES DEL BOT ---
 @bot.event
 async def on_ready():
@@ -59,6 +97,14 @@ async def on_ready():
             await voice_channel.connect()
             print(f'🔗 Conectado a {voice_channel.name}.')
             bot_is_ready = True
+            
+            # --- LÓGICA DE REINICIO INTELIGENTE ---
+            scheduler = AsyncIOScheduler(timezone="America/Lima")
+            # Comprobará cada día a las 4:00 AM
+            trigger = CronTrigger(hour=13, minute=5) 
+            scheduler.add_job(scheduled_restart_check, trigger)
+            scheduler.start()
+            print("⏰ El programador de reinicio inteligente está activo.")
         except Exception as e:
             print(f'❌ Error durante la conexión inicial: {e}')
 
@@ -67,10 +113,17 @@ async def on_voice_state_update(member, before, after):
     if not bot_is_ready:
         return
     
-    global bot_is_zombie, last_reconnect_attempt
+    global bot_is_zombie, last_reconnect_attempt, restart_is_pending
     voice_client = discord.utils.get(bot.voice_clients, guild=member.guild)
     designated_channel = bot.get_channel(VOICE_CHANNEL_ID)
 
+    # --- LÓGICA DE DISPARO DE REINICIO PENDIENTE ---
+    if restart_is_pending and voice_client and len(voice_client.channel.members) >= 3:
+        await perform_restart(voice_client)
+        restart_is_pending = False
+        return
+
+    # --- LÓGICA DE MANEJO DE DESCONEXIÓN ---
     if member.id == bot.user.id and after.channel is None:
         current_time = time.time()
         if current_time - last_reconnect_attempt < 60:
@@ -92,6 +145,7 @@ async def on_voice_state_update(member, before, after):
                 print(f"❌ Error inesperado al reconectar: {e}")
         return
 
+    # --- LÓGICA DE BIENVENIDA Y CURACIÓN DE ZOMBIE ---
     if not member.bot and after.channel == designated_channel:
         if bot_is_zombie:
             print(f"👤 Usuario ha entrado. Curando al bot zombie...")
@@ -118,10 +172,7 @@ async def on_message(message):
 
     text_to_read = re.sub(r'https?://\S+', '', message.content).strip()
     
-    if not text_to_read and message.attachments:
-        await bot.process_application_commands(message)
-        return
-    if not text_to_read:
+    if (not text_to_read and message.attachments) or not text_to_read:
         await bot.process_application_commands(message)
         return
 
