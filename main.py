@@ -4,33 +4,17 @@ from discord.ext import commands
 import asyncio
 import os
 from gtts import gTTS
-import random
-import io
 import time
-from serpapi import GoogleSearch
 import re
-import aiohttp
-from bs4 import BeautifulSoup
-from PIL import Image
-
-# Importamos ambas librerías de Google
-import google.generativeai as genai
-from google.cloud import aiplatform
-from vertexai.vision_models import ImageGenerationModel
-
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 
 # --- 1. CARGA DE CONFIGURACIÓN Y TOKEN ---
 from config import (
     VOICE_CHANNEL_ID,
     TTS_BRIDGE_CHANNEL_ID,
     TTS_BRIDGE_ROLE_NAME,
-    FOLLOWME_EXEMPT_USER_ID,
-    DREAM_CHANNEL_ID
+    FOLLOWME_EXEMPT_USER_ID
 )
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-PROJECT_ID = "plucky-rarity-473620-v0" # Tu ID de proyecto
 
 # --- 2. CONFIGURACIÓN DE INTENTS DEL BOT ---
 intents = discord.Intents.default()
@@ -48,7 +32,7 @@ bot_is_zombie = False
 bot_is_ready = False
 last_reconnect_attempt = 0
 
-# --- 4. FUNCIONES AUXILIARES ---
+# --- 4. FUNCIÓN AUXILIAR PARA TEXT-TO-SPEECH (TTS) ---
 async def play_tts(voice_client, text, filename="tts.mp3"):
     if not voice_client or not voice_client.is_connected(): return
     try:
@@ -64,145 +48,6 @@ async def play_tts(voice_client, text, filename="tts.mp3"):
         print(f"Error en play_tts: {e}")
         if os.path.exists(filename): os.remove(filename)
 
-# --- Función bloqueante para la generación de imagen ---
-def generate_image_blocking(prompt):
-    """
-    Esta función contiene el trabajo pesado y síncrono de generar la imagen.
-    Se ejecutará en un hilo separado para no congelar el bot.
-    """
-    try:
-        aiplatform.init(project=PROJECT_ID)
-        model = ImageGenerationModel.from_pretrained("imagegeneration@006")
-        response = model.generate_images(prompt=prompt, number_of_images=1)
-        return response.images[0]._image_bytes
-    except Exception as e:
-        print(f"Error en el hilo de generación de imagen: {e}")
-        return None
-
-async def dream_task(channel: discord.TextChannel = None):
-    """La tarea programada que hace que el bot 'sueñe'."""
-    print("🌙 El bot está intentando soñar...")
-    try:
-        # PASO 1: Generar texto con la librería 'google-generativeai'
-        text_model = genai.GenerativeModel('gemini-2.5-pro')
-        prompt_para_texto = "Escribe una única frase muy corta (menos de 15 palabras) que sea poética, surrealista y misteriosa..."
-        text_response = await text_model.generate_content_async(prompt_para_texto)
-        dream_text = text_response.text.strip().replace('*', '')
-        print(f"Texto del sueño generado: '{dream_text}'")
-
-        # PASO 2: Generar imagen en un hilo separado con la librería 'google-cloud-aiplatform'
-        prompt_para_imagen = (
-            f"Una imagen artística, de alta calidad, surrealista y de ensueño basada en esta frase: '{dream_text}'. "
-            "Estilo: pintura digital etérea, colores melancólicos, cinematográfico."
-        )
-        
-        loop = asyncio.get_running_loop()
-        image_data = await loop.run_in_executor(
-            None, generate_image_blocking, prompt_para_imagen
-        )
-
-        if not image_data:
-            raise ValueError("La generación de imagen no devolvió datos.")
-
-        image_file = discord.File(io.BytesIO(image_data), filename="sueño.png")
-        target_channel = channel or bot.get_channel(DREAM_CHANNEL_ID)
-
-        if target_channel:
-            await target_channel.send(f"> {dream_text}", file=image_file)
-            print("😴 El bot ha soñado con éxito.")
-        else:
-            print("❌ No se encontró el canal de sueños.")
-
-    except Exception as e:
-        print(f"Error durante el sueño del bot: {e}")
-        if channel:
-            await channel.send("Lo siento, hubo un error al intentar soñar.")
-
-async def get_lima_photo_of_the_day():
-    """
-    Busca una página con una foto de Lima y extrae la imagen real
-    desde el código HTML de la página. (Versión sin Gemini)
-    """
-    print("📸 Buscando la foto del día de Lima...")
-    serpapi_key = os.getenv("SERPAPI_KEY")
-    if not serpapi_key:
-        print("❌ Falta la variable de entorno SERPAPI_KEY.")
-        return None, None
-
-    try:
-        params = {
-            "q": '"Lima Perú" (site:flickr.com OR site:unsplash.com OR site:instagram.com)',
-            "tbm": "isch",
-            "tbs": "qdr:d",
-            "api_key": serpapi_key
-        }
-        search = GoogleSearch(params)
-        results = search.get_dict()
-        
-        if "images_results" not in results or not results["images_results"]:
-            print("❌ No se encontraron imágenes recientes.")
-            return None, None
-
-        random.shuffle(results["images_results"])
-
-        for image_result in results["images_results"]:
-            page_url = image_result.get("link")
-            if not page_url:
-                continue
-
-            print(f"📄 Analizando página: {page_url}")
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(page_url, timeout=15) as resp:
-                        if resp.status != 200:
-                            continue
-                        html_content = await resp.text()
-
-                soup = BeautifulSoup(html_content, 'html.parser')
-                meta_tag = soup.find('meta', property='og:image')
-                
-                if not meta_tag or not meta_tag.get('content'):
-                    continue
-                
-                real_image_url = meta_tag['content']
-                print(f"🖼️ Encontrada URL de imagen real: {real_image_url}")
-
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(real_image_url, timeout=15) as img_resp:
-                        if img_resp.status != 200:
-                            continue
-                        image_bytes = await img_resp.read()
-
-                # Verificamos que sea una imagen antes de devolverla
-                with Image.open(io.BytesIO(image_bytes)) as img:
-                    img.verify()
-                
-                print("✅ Imagen descargada y validada exitosamente.")
-                return image_bytes, page_url # Devolvemos solo la imagen y la fuente
-
-            except Exception as e:
-                print(f"⚠️ Error al procesar la página {page_url}: {e}")
-
-        print("❌ No se pudo extraer ninguna imagen válida de los resultados.")
-        return None, None
-
-    except Exception as e:
-        print(f"Error en get_lima_photo_of_the_day: {e}")
-        return None, None
-
-# --- Función para la Automatización (tu lógica) ---
-async def post_lima_photo_auto():
-    """Función que se ejecutará automáticamente cada día."""
-    channel = bot.get_channel(LIMA_PHOTO_CHANNEL_ID)
-    if not channel:
-        print(f"❌ No se encontró el canal para la foto de Lima con ID: {LIMA_PHOTO_CHANNEL_ID}")
-        return
-    
-    image_data, caption, source = await get_lima_photo_of_the_day()
-    if image_data and caption:
-        image_file = discord.File(io.BytesIO(image_data), filename="lima_hoy.jpg")
-        await channel.send(content=f"> {caption}\n📸 Fuente: <{source}>", file=image_file)
-
 # --- 5. EVENTOS PRINCIPALES DEL BOT ---
 @bot.event
 async def on_ready():
@@ -214,14 +59,6 @@ async def on_ready():
             await voice_channel.connect()
             print(f'🔗 Conectado a {voice_channel.name}.')
             bot_is_ready = True
-            
-            scheduler = AsyncIOScheduler(timezone="America/Lima")
-            trigger = CronTrigger(hour=3, minute=0, jitter=7200)
-            scheduler.add_job(dream_task, trigger)
-            photo_trigger = CronTrigger(hour=19, minute=30, timezone="America/Lima")
-            scheduler.add_job(post_lima_photo_auto, photo_trigger)
-            scheduler.start()
-            print("⏰ El programador de sueños y de la foto de Lima están activos.")
         except Exception as e:
             print(f'❌ Error durante la conexión inicial: {e}')
 
@@ -276,26 +113,17 @@ async def on_voice_state_update(member, before, after):
 @bot.event
 async def on_message(message):
     if message.author.bot or not message.guild:
-        # Procesamos los comandos slash incluso si el resto se ignora
         await bot.process_application_commands(message)
         return
 
-    # --- NUEVA LÓGICA DE FILTRADO ---
-    # 1. Si el mensaje no tiene texto pero sí tiene archivos, lo ignoramos.
-    if not message.content and message.attachments:
-        print("⏭️ Omitiendo mensaje que solo contiene un archivo adjunto.")
-        await bot.process_application_commands(message)
-        return
-
-    # 2. Limpiamos cualquier URL del contenido del mensaje.
     text_to_read = re.sub(r'https?://\S+', '', message.content).strip()
     
-    # 3. Si después de limpiar no queda nada que leer, lo ignoramos.
-    if not text_to_read:
-        print("⏭️ Omitiendo mensaje que solo contenía una URL.")
+    if not text_to_read and message.attachments:
         await bot.process_application_commands(message)
         return
-    # --- FIN DE LA NUEVA LÓGICA ---
+    if not text_to_read:
+        await bot.process_application_commands(message)
+        return
 
     voice_client = discord.utils.get(bot.voice_clients, guild=message.guild)
     if not voice_client:
@@ -303,10 +131,10 @@ async def on_message(message):
         return
 
     should_speak = False
+    text_with_author = text_to_read
+    
     is_bridge_message = (tts_bridge_enabled and message.channel.id == TTS_BRIDGE_CHANNEL_ID and discord.utils.get(message.author.roles, name=TTS_BRIDGE_ROLE_NAME))
     is_followed_user_message = message.author.id in followed_user_ids
-    
-    text_with_author = text_to_read # Usamos el texto ya limpiado
 
     if is_bridge_message:
         text_with_author = f"{message.author.display_name} dice: {text_to_read}"
@@ -322,19 +150,6 @@ async def on_message(message):
     await bot.process_application_commands(message)
 
 # --- 6. COMANDOS SLASH ---
-@bot.slash_command(name="test_dream", description="Fuerza al bot a soñar ahora mismo para pruebas.")
-@commands.is_owner()
-async def test_dream(ctx: discord.ApplicationContext):
-    await ctx.defer(ephemeral=True)
-    print(f"--- Forzando un sueño por orden de {ctx.author.name} ---")
-    await dream_task(channel=ctx.channel)
-    await ctx.followup.send("Intento de sueño completado. Revisa la consola para ver los logs.")
-
-@test_dream.error
-async def test_dream_error(ctx, error):
-    if isinstance(error, commands.NotOwner):
-        await ctx.respond("⛔ Solo el dueño del bot puede usar este comando.", ephemeral=True)
-
 @bot.slash_command(name="ping", description="Verifica la latencia del bot.")
 async def ping(ctx: discord.ApplicationContext):
     await ctx.respond(f"¡Pong! 🏓 Latencia: {round(bot.latency * 1000)}ms", ephemeral=True)
@@ -374,21 +189,6 @@ async def unfollowme(ctx: discord.ApplicationContext):
         print(f"⏹️ El bot ha dejado de seguir a {ctx.author.display_name}.")
     else:
         await ctx.respond("El bot no te está siguiendo.", ephemeral=True)
-
-@bot.slash_command(name="lima_de_hoy", description="Busca y muestra una foto reciente de Lima.")
-@commands.is_owner()
-async def lima_de_hoy(ctx: discord.ApplicationContext):
-    await ctx.defer()
-    
-    # La función ahora solo devuelve la imagen y la fuente
-    image_data, source = await get_lima_photo_of_the_day()
-    
-    if image_data:
-        image_file = discord.File(io.BytesIO(image_data), filename="lima_hoy.jpg")
-        # Usamos un caption simple y genérico
-        await ctx.followup.send(content=f"> Foto del día de Lima:\n📸 Fuente: <{source}>", file=image_file)
-    else:
-        await ctx.followup.send("Lo siento, no pude encontrar una foto de Lima hoy.")
 
 # --- 7. EJECUCIÓN DEL BOT ---
 if __name__ == "__main__":
