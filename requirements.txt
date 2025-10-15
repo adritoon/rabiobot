@@ -6,3 +6,4 @@ apscheduler
 Pillow
 google-search-results
 beautifulsoup4
+yt-dlp

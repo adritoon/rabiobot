@@ -22,3 +22,7 @@ DREAM_CHANNEL_ID = 1426470503710720031
 
 # --- Configuración de la Foto del Día de Lima ---
 LIMA_PHOTO_CHANNEL_ID = 1355955093010252019 # ID del canal para la foto automática
+
+RADIO_URL = "https://www.youtube.com/watch?v=M91VPs47jZc"
+
+GENERAL_CHANNEL_ID = 1355955093010252019
