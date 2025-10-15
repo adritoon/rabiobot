@@ -43,8 +43,22 @@ radio_is_auto = False
 # --- 4. CLASE PARA LOS BOTONES DE LA RADIO ---
 class RadioControlView(discord.ui.View):
     def __init__(self, voice_client):
-        super().__init__(timeout=60) # Los botones desaparecerán después de 60 segundos
+        # 1. Restauramos el tiempo de espera a 60 segundos
+        super().__init__(timeout=60) 
         self.voice_client = voice_client
+        self.message = None # Guardaremos una referencia al mensaje
+
+    async def on_timeout(self):
+        """
+        Esta función se ejecuta automáticamente cuando los botones caducan.
+        """
+        # Deshabilitamos todos los botones (se pondrán grises)
+        for item in self.children:
+            item.disabled = True
+        
+        # Editamos el mensaje original para mostrar la nueva información
+        if self.message:
+            await self.message.edit(content="El tiempo para decidir ha terminado. La música continuará.\n*Puedes detenerla en cualquier momento con el comando `/radio stop`.*", view=self)
 
     @discord.ui.button(label="Detener Radio", style=discord.ButtonStyle.red, emoji="⏹️")
     async def stop_button(self, button: discord.ui.Button, interaction: discord.Interaction):
@@ -52,7 +66,6 @@ class RadioControlView(discord.ui.View):
         if self.voice_client and self.voice_client.is_playing():
             self.voice_client.stop()
             radio_is_auto = False
-            # Editamos el mensaje original para confirmar la acción
             await interaction.response.edit_message(content=f"📻 La radio ha sido detenida por {interaction.user.display_name}.", view=None)
         else:
             await interaction.response.edit_message(content="La radio ya no estaba sonando.", view=None)
@@ -60,7 +73,6 @@ class RadioControlView(discord.ui.View):
 
     @discord.ui.button(label="Mantener Música", style=discord.ButtonStyle.green, emoji="🎶")
     async def keep_button(self, button: discord.ui.Button, interaction: discord.Interaction):
-        # Editamos el mensaje original para confirmar la acción
         await interaction.response.edit_message(content=f"👍 La música seguirá sonando gracias a {interaction.user.display_name}.", view=None)
         self.stop()
 
@@ -184,13 +196,17 @@ async def on_ready():
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    if not bot_is_ready: return
+    if not bot_is_ready:
+        return
     
     global bot_is_zombie, last_reconnect_attempt, restart_is_pending, radio_is_auto
     voice_client = discord.utils.get(bot.voice_clients, guild=member.guild)
     designated_channel = bot.get_channel(VOICE_CHANNEL_ID)
 
     # --- LÓGICA DE RADIO AUTOMÁTICA Y ANUNCIO CON BOTONES ---
+    radio_prompt_sent = False # Bandera para evitar que la bienvenida se active a la vez
+
+    # 1. Alguien se va y el bot se queda solo
     if before.channel and len(before.channel.members) == 1 and bot.user in before.channel.members:
         if voice_client and before.channel == voice_client.channel:
             print("🤖 El bot se ha quedado solo. Iniciando radio automática...")
@@ -200,12 +216,19 @@ async def on_voice_state_update(member, before, after):
             if general_channel:
                 await general_channel.send(f"🎶 La radio automática ha comenzado en **{voice_client.channel.name}**. ¡El ambiente perfecto para cuando vuelvan!")
 
+    # 2. Alguien entra al canal donde el bot está solo y con la radio automática
     if not member.bot and after.channel and voice_client and after.channel == voice_client.channel and len(after.channel.members) == 2 and radio_is_auto:
         print(f"👤 {member.display_name} ha entrado. Ofreciendo opciones de radio...")
         general_channel = bot.get_channel(GENERAL_CHANNEL_ID)
         if general_channel:
             view = RadioControlView(voice_client)
-            await general_channel.send(f"¡Hola, {member.display_name}! La radio automática está sonando. ¿Qué quieres hacer?", view=view)
+            # Guardamos la referencia al mensaje para poder editarlo después
+            message = await general_channel.send(
+                f"¡Hola, {member.display_name}! La radio automática está sonando. ¿Qué quieres hacer?",
+                view=view
+            )
+            view.message = message # Le pasamos el mensaje a la vista
+            radio_prompt_sent = True # Indicamos que se enviaron los botones
 
     # --- LÓGICA DE REINICIO, RECONEXIÓN Y BIENVENIDA ---
     if restart_is_pending and voice_client and len(voice_client.channel.members) >= 3:
@@ -219,6 +242,7 @@ async def on_voice_state_update(member, before, after):
             print("🔥 ¡BUCLE DE RECONEXIÓN DETECTADO! Abortando.")
             return
         last_reconnect_attempt = current_time
+
         print("🔴 El bot ha sido desconectado. Intentando reconexión...")
         await asyncio.sleep(5)
         try:
@@ -247,7 +271,9 @@ async def on_voice_state_update(member, before, after):
                 print("✅ Bot curado y funcional.")
             except Exception as surgery_error:
                 print(f"❌ Error durante la curación: {surgery_error}")
-        elif voice_client and before.channel != after.channel:
+        
+        # Solo da la bienvenida si NO se activó el prompt de radio
+        elif voice_client and before.channel != after.channel and not radio_prompt_sent:
             welcome_message = f"Bienvenido, {member.display_name}"
             await play_tts(voice_client, welcome_message, f"welcome_{member.id}.mp3")
 
