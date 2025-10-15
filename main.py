@@ -101,7 +101,7 @@ async def on_ready():
             # --- LÓGICA DE REINICIO INTELIGENTE ---
             scheduler = AsyncIOScheduler(timezone="America/Lima")
             # Comprobará cada día a las 4:00 AM
-            trigger = CronTrigger(hour=21, minute=5) 
+            trigger = CronTrigger(hour=21, minute=8) 
             scheduler.add_job(scheduled_restart_check, trigger)
             scheduler.start()
             print("⏰ El programador de reinicio inteligente está activo.")
