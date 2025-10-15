@@ -40,11 +40,34 @@ last_reconnect_attempt = 0
 restart_is_pending = False
 radio_is_auto = False
 
-# --- 4. FUNCIONES AUXILIARES Y DE MANTENIMIENTO ---
+# --- 4. CLASE PARA LOS BOTONES DE LA RADIO ---
+class RadioControlView(discord.ui.View):
+    def __init__(self, voice_client):
+        super().__init__(timeout=60) # Los botones desaparecerán después de 60 segundos
+        self.voice_client = voice_client
+
+    @discord.ui.button(label="Detener Radio", style=discord.ButtonStyle.red, emoji="⏹️")
+    async def stop_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        global radio_is_auto
+        if self.voice_client and self.voice_client.is_playing():
+            self.voice_client.stop()
+            radio_is_auto = False
+            # Editamos el mensaje original para confirmar la acción
+            await interaction.response.edit_message(content=f"📻 La radio ha sido detenida por {interaction.user.display_name}.", view=None)
+        else:
+            await interaction.response.edit_message(content="La radio ya no estaba sonando.", view=None)
+        self.stop()
+
+    @discord.ui.button(label="Mantener Música", style=discord.ButtonStyle.green, emoji="🎶")
+    async def keep_button(self, button: discord.ui.Button, interaction: discord.Interaction):
+        # Editamos el mensaje original para confirmar la acción
+        await interaction.response.edit_message(content=f"👍 La música seguirá sonando gracias a {interaction.user.display_name}.", view=None)
+        self.stop()
+
+# --- 5. FUNCIONES AUXILIARES Y DE MANTENIMIENTO ---
 async def play_tts(voice_client, text, filename="tts.mp3"):
     if not voice_client or not voice_client.is_connected(): return
     try:
-        # Detiene la radio para dar prioridad a la voz
         radio_was_playing_auto = voice_client.is_playing() and radio_is_auto
         if voice_client.is_playing():
             voice_client.stop()
@@ -58,17 +81,14 @@ async def play_tts(voice_client, text, filename="tts.mp3"):
         while voice_client.is_playing(): await asyncio.sleep(0.5)
         os.remove(filename)
 
-        # Si la radio automática estaba sonando, la reinicia
         if radio_was_playing_auto:
             print("TTS finalizado, reanudando radio automática...")
             await start_radio(voice_client)
-
     except Exception as e:
         print(f"Error en play_tts: {e}")
         if os.path.exists(filename): os.remove(filename)
 
 async def perform_restart(voice_client):
-    """Anuncia, lanza el script de reinicio y se apaga limpiamente."""
     print("🚀 Iniciando secuencia de reinicio programado...")
     try:
         await play_tts(voice_client, "Iniciando reinicio programado para mantenimiento. Volveré en un momento.")
@@ -80,7 +100,6 @@ async def perform_restart(voice_client):
         print(f"❌ Error durante la secuencia de reinicio: {e}")
 
 async def scheduled_restart_check():
-    """Comprueba si se cumplen las condiciones para un reinicio."""
     global restart_is_pending
     print("⏰ Comprobando condiciones para el reinicio nocturno...")
     voice_client = bot.voice_clients[0] if bot.voice_clients else None
@@ -93,30 +112,58 @@ async def scheduled_restart_check():
     else:
         print("Bot no está en un canal de voz. Reinicio cancelado para hoy.")
 
-# --- NUEVAS FUNCIONES DE RADIO ---
-async def start_radio(voice_client: discord.VoiceClient):
-    """Inicia la reproducción de la radio en el canal de voz."""
-    if not voice_client or not voice_client.is_connected() or voice_client.is_playing():
+# Reemplaza tu función start_radio con esta
+async def start_radio(voice_client: discord.VoiceClient, url: str = RADIO_URL):
+    """Inicia la reproducción de un stream de audio en el canal de voz."""
+    if not voice_client or not voice_client.is_connected():
         return
+    # Si ya está sonando algo, lo paramos primero
+    if voice_client.is_playing():
+        voice_client.stop()
+        await asyncio.sleep(0.5)
+
     YDL_OPTIONS = {'format': 'bestaudio/best', 'noplaylist': 'True'}
     FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+
     try:
         with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
-            info = ydl.extract_info(RADIO_URL, download=False)
-            url = info['url']
-            source = await discord.FFmpegOpusAudio.from_probe(url, **FFMPEG_OPTIONS)
-            voice_client.play(source)
-            print("📻 Radio iniciada.")
+            # Si no es una URL, yt-dlp lo buscará en YouTube
+            info = ydl.extract_info(f"ytsearch:{url}" if not url.startswith("http") else url, download=False)
+            
+            # Si es una búsqueda, tomamos el primer resultado
+            if 'entries' in info:
+                info = info['entries'][0]
+            
+            stream_url = info['url']
+            source = await discord.FFmpegOpusAudio.from_probe(stream_url, **FFMPEG_OPTIONS)
+            
+            # Función callback que se ejecuta cuando la canción termina
+            def after_playing(error):
+                if error:
+                    print(f"Error al terminar la reproducción: {error}")
+                
+                # Lógica para reanudar la radio automática
+                if len(voice_client.channel.members) == 1:
+                    print("La canción ha terminado y el bot está solo. Reanudando radio automática.")
+                    # Usamos bot.loop.create_task para llamar a una función async desde un callback síncrono
+                    bot.loop.create_task(start_radio(voice_client, RADIO_URL))
+                    global radio_is_auto
+                    radio_is_auto = True
+
+            voice_client.play(source, after=after_playing)
+            print(f"📻 Reproduciendo: {info.get('title', 'Radio Stream')}")
+            return info.get('title', 'Canción desconocida') # Devolvemos el título
+
     except Exception as e:
-        print(f"❌ Error al iniciar la radio: {e}")
+        print(f"❌ Error al iniciar la radio/play: {e}")
+        return None
 
 async def stop_radio(voice_client: discord.VoiceClient):
-    """Detiene la reproducción de la radio."""
     if voice_client and voice_client.is_playing():
         voice_client.stop()
         print("📻 Radio detenida.")
 
-# --- 5. EVENTOS PRINCIPALES DEL BOT ---
+# --- 6. EVENTOS PRINCIPALES DEL BOT ---
 @bot.event
 async def on_ready():
     global bot_is_ready
@@ -128,7 +175,7 @@ async def on_ready():
             print(f'🔗 Conectado a {voice_channel.name}.')
             bot_is_ready = True
             scheduler = AsyncIOScheduler(timezone="America/Lima")
-            trigger = CronTrigger(hour=21, minute=8) 
+            trigger = CronTrigger(hour=13, minute=5) 
             scheduler.add_job(scheduled_restart_check, trigger)
             scheduler.start()
             print("⏰ El programador de reinicio inteligente está activo.")
@@ -137,32 +184,29 @@ async def on_ready():
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    if not bot_is_ready:
-        return
+    if not bot_is_ready: return
     
     global bot_is_zombie, last_reconnect_attempt, restart_is_pending, radio_is_auto
     voice_client = discord.utils.get(bot.voice_clients, guild=member.guild)
     designated_channel = bot.get_channel(VOICE_CHANNEL_ID)
 
-    # --- LÓGICA DE RADIO AUTOMÁTICA ---
+    # --- LÓGICA DE RADIO AUTOMÁTICA Y ANUNCIO CON BOTONES ---
     if before.channel and len(before.channel.members) == 1 and bot.user in before.channel.members:
         if voice_client and before.channel == voice_client.channel:
             print("🤖 El bot se ha quedado solo. Iniciando radio automática...")
             await start_radio(voice_client)
             radio_is_auto = True
-            # --- NUEVA LÓGICA DE ANUNCIO ---
             general_channel = bot.get_channel(GENERAL_CHANNEL_ID)
             if general_channel:
-                await general_channel.send(f"🎶 La radio automática ha comenzado en el canal de voz **{voice_client.channel.name}**. ¡Únete para escuchar!")
-            else:
-                print(f"❌ No se encontró el canal general con ID {GENERAL_CHANNEL_ID} para el anuncio.")
-            # --- FIN DE LA LÓGICA DE ANUNCIO ---
+                await general_channel.send(f"🎶 La radio automática ha comenzado en **{voice_client.channel.name}**. ¡El ambiente perfecto para cuando vuelvan!")
 
     if not member.bot and after.channel and voice_client and after.channel == voice_client.channel and len(after.channel.members) == 2 and radio_is_auto:
-        print(f"👤 {member.display_name} ha entrado. Deteniendo radio automática.")
-        await stop_radio(voice_client)
-        radio_is_auto = False
-    
+        print(f"👤 {member.display_name} ha entrado. Ofreciendo opciones de radio...")
+        general_channel = bot.get_channel(GENERAL_CHANNEL_ID)
+        if general_channel:
+            view = RadioControlView(voice_client)
+            await general_channel.send(f"¡Hola, {member.display_name}! La radio automática está sonando. ¿Qué quieres hacer?", view=view)
+
     # --- LÓGICA DE REINICIO, RECONEXIÓN Y BIENVENIDA ---
     if restart_is_pending and voice_client and len(voice_client.channel.members) >= 3:
         await perform_restart(voice_client)
@@ -235,7 +279,7 @@ async def on_message(message):
         await play_tts(voice_client, text_with_author, f"speech_{message.id}.mp3")
     await bot.process_application_commands(message)
 
-# --- 6. COMANDOS SLASH ---
+# --- 7. COMANDOS SLASH ---
 @bot.slash_command(name="ping", description="Verifica la latencia del bot.")
 async def ping(ctx: discord.ApplicationContext):
     await ctx.respond(f"¡Pong! 🏓 Latencia: {round(bot.latency * 1000)}ms", ephemeral=True)
@@ -243,7 +287,6 @@ async def ping(ctx: discord.ApplicationContext):
 @bot.slash_command(name="radio", description="Controla la radio 24/7.")
 @commands.is_owner()
 async def radio(ctx: discord.ApplicationContext, accion: discord.Option(str, choices=["start", "stop"])):
-    """Inicia o detiene la radio manualmente."""
     global radio_is_auto
     voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
     if not voice_client or not voice_client.is_connected():
@@ -260,6 +303,35 @@ async def radio(ctx: discord.ApplicationContext, accion: discord.Option(str, cho
         await stop_radio(voice_client)
         radio_is_auto = False
         await ctx.respond("📻 Radio detenida.", ephemeral=True)
+
+# ... (después del comando /radio)
+
+@bot.slash_command(name="play", description="Reproduce una canción de YouTube.")
+async def play(ctx: discord.ApplicationContext, cancion: str):
+    """Busca y reproduce una canción o URL de YouTube."""
+    global radio_is_auto
+    voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+
+    # Verificamos si el usuario está en un canal de voz
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        return await ctx.respond("Debes estar en un canal de voz para poner música.", ephemeral=True)
+
+    # Si el bot no está conectado, se une al canal del usuario
+    if not voice_client:
+        voice_client = await ctx.author.voice.channel.connect()
+    # Si el bot está en otro canal, se mueve al del usuario
+    elif voice_client.channel != ctx.author.voice.channel:
+        await voice_client.move_to(ctx.author.voice.channel)
+
+    await ctx.defer() # Damos tiempo al bot para buscar la canción
+
+    radio_is_auto = False # Una petición manual siempre desactiva el modo automático
+    song_title = await start_radio(voice_client, url=cancion)
+
+    if song_title:
+        await ctx.followup.send(f"🎵 Ahora sonando: **{song_title}**")
+    else:
+        await ctx.followup.send("Lo siento, no pude encontrar o reproducir esa canción.")
 
 @bot.slash_command(name="bridge", description="Activa o desactiva el puente de texto a voz.")
 @commands.has_role(TTS_BRIDGE_ROLE_NAME)
@@ -297,7 +369,7 @@ async def unfollowme(ctx: discord.ApplicationContext):
     else:
         await ctx.respond("El bot no te está siguiendo.", ephemeral=True)
 
-# --- 7. EJECUCIÓN DEL BOT ---
+# --- 8. EJECUCIÓN DEL BOT ---
 if __name__ == "__main__":
     if not DISCORD_TOKEN:
         print("❌ ERROR CRÍTICO: La variable de entorno DISCORD_TOKEN no está configurada.")
