@@ -187,7 +187,7 @@ async def on_ready():
             print(f'🔗 Conectado a {voice_channel.name}.')
             bot_is_ready = True
             scheduler = AsyncIOScheduler(timezone="America/Lima")
-            trigger = CronTrigger(hour=13, minute=5) 
+            trigger = CronTrigger(hour=21, minute=5) 
             scheduler.add_job(scheduled_restart_check, trigger)
             scheduler.start()
             print("⏰ El programador de reinicio inteligente está activo.")
