@@ -179,15 +179,27 @@ async def on_ready():
     global bot_is_ready
     print(f'✅ Bot conectado como: {bot.user.name}')
     
-    # Inicia la tarea de monitoreo de salud
+    # --- LÓGICA DE CONEXIÓN INICIAL (CORREGIDA) ---
+    voice_channel = bot.get_channel(VOICE_CHANNEL_ID)
+    if voice_channel:
+        try:
+            # 1. Realizamos la conexión inicial aquí, como antes.
+            await voice_channel.connect()
+            print(f'🔗 Conectado a {voice_channel.name}.')
+        except Exception as e:
+            print(f'❌ Error durante la conexión inicial: {e}')
+    
+    # --- INICIO DE TAREAS EN SEGUNDO PLANO ---
+    # 2. Una vez conectado, iniciamos el vigilante y el programador.
     health_check.start()
-
-    # (El resto de la lógica de on_ready no cambia)
+    print("🩺 El monitor de salud está activo.")
+    
     scheduler = AsyncIOScheduler(timezone="America/Lima")
     trigger = CronTrigger(hour=13, minute=5) 
     scheduler.add_job(scheduled_restart_check, trigger)
     scheduler.start()
     print("⏰ El programador de reinicio inteligente está activo.")
+    
     bot_is_ready = True
 
 @tasks.loop(seconds=30.0)
