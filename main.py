@@ -203,32 +203,26 @@ async def on_voice_state_update(member, before, after):
     voice_client = discord.utils.get(bot.voice_clients, guild=member.guild)
     designated_channel = bot.get_channel(VOICE_CHANNEL_ID)
 
-    # --- LÓGICA DE RADIO AUTOMÁTICA Y ANUNCIO CON BOTONES ---
-    radio_prompt_sent = False # Bandera para evitar que la bienvenida se active a la vez
-
+    # --- LÓGICA DE RADIO AUTOMÁTICA ---
     # 1. Alguien se va y el bot se queda solo
-    if before.channel and len(before.channel.members) == 1 and bot.user in before.channel.members:
-        if voice_client and before.channel == voice_client.channel:
-            print("🤖 El bot se ha quedado solo. Iniciando radio automática...")
-            await start_radio(voice_client)
-            radio_is_auto = True
-            general_channel = bot.get_channel(GENERAL_CHANNEL_ID)
-            if general_channel:
-                await general_channel.send(f"🎶 La radio automática ha comenzado en **{voice_client.channel.name}**. ¡El ambiente perfecto para cuando vuelvan!")
+    if before.channel == designated_channel and len(before.channel.members) == 1 and bot.user in before.channel.members:
+        print("🤖 El bot se ha quedado solo. Iniciando radio automática...")
+        await start_radio(voice_client)
+        radio_is_auto = True
+        general_channel = bot.get_channel(GENERAL_CHANNEL_ID)
+        if general_channel:
+            await general_channel.send(f"🎶 La radio automática ha comenzado en **{voice_client.channel.name}**.")
 
-    # 2. Alguien entra al canal donde el bot está solo y con la radio automática
-    if not member.bot and after.channel and voice_client and after.channel == voice_client.channel and len(after.channel.members) == 2 and radio_is_auto:
+    # 2. Alguien entra al canal donde el bot está solo con la radio
+    radio_prompt_sent = False
+    if not member.bot and after.channel == designated_channel and len(after.channel.members) == 2 and radio_is_auto:
         print(f"👤 {member.display_name} ha entrado. Ofreciendo opciones de radio...")
         general_channel = bot.get_channel(GENERAL_CHANNEL_ID)
         if general_channel:
             view = RadioControlView(voice_client)
-            # Guardamos la referencia al mensaje para poder editarlo después
-            message = await general_channel.send(
-                f"¡Hola, {member.display_name}! La radio automática está sonando. ¿Qué quieres hacer?",
-                view=view
-            )
-            view.message = message # Le pasamos el mensaje a la vista
-            radio_prompt_sent = True # Indicamos que se enviaron los botones
+            message = await general_channel.send(f"¡Hola, {member.display_name}! La radio automática está sonando. ¿Qué quieres hacer?", view=view)
+            view.message = message
+            radio_prompt_sent = True
 
     # --- LÓGICA DE REINICIO, RECONEXIÓN Y BIENVENIDA ---
     if restart_is_pending and voice_client and len(voice_client.channel.members) >= 3:
@@ -242,7 +236,6 @@ async def on_voice_state_update(member, before, after):
             print("🔥 ¡BUCLE DE RECONEXIÓN DETECTADO! Abortando.")
             return
         last_reconnect_attempt = current_time
-
         print("🔴 El bot ha sido desconectado. Intentando reconexión...")
         await asyncio.sleep(5)
         try:
@@ -257,9 +250,13 @@ async def on_voice_state_update(member, before, after):
                 print(f"❌ Error inesperado al reconectar: {e}")
         return
 
+    # --- LÓGICA DE BIENVENIDA Y CURACIÓN DE ZOMBIE (CORREGIDA) ---
+    # Solo se activa si un usuario entra al canal designado
     if not member.bot and after.channel == designated_channel:
-        if bot_is_zombie:
-            print(f"👤 Usuario ha entrado. Curando al bot zombie...")
+        
+        # CORRECCIÓN: La curación solo se activa si el usuario VIENE DE AFUERA (before.channel es None)
+        if bot_is_zombie and before.channel is None:
+            print(f"👤 {member.display_name} ha entrado. Es la señal para curar al bot zombie.")
             last_reconnect_attempt = time.time()
             try:
                 current_vc = discord.utils.get(bot.voice_clients, guild=member.guild)
@@ -272,7 +269,7 @@ async def on_voice_state_update(member, before, after):
             except Exception as surgery_error:
                 print(f"❌ Error durante la curación: {surgery_error}")
         
-        # Solo da la bienvenida si NO se activó el prompt de radio
+        # La bienvenida solo se activa si el usuario cambia de canal Y no se enviaron los botones de la radio
         elif voice_client and before.channel != after.channel and not radio_prompt_sent:
             welcome_message = f"Bienvenido, {member.display_name}"
             await play_tts(voice_client, welcome_message, f"welcome_{member.id}.mp3")
