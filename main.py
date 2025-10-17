@@ -208,28 +208,32 @@ async def health_check():
     if not bot_is_ready:
         return # No hacer nada hasta que el bot esté completamente iniciado
 
-    voice_client = discord.utils.get(bot.voice_clients, guild__id=bot.guilds[0].id if bot.guilds else None)
     designated_channel = bot.get_channel(VOICE_CHANNEL_ID)
+    if not designated_channel:
+        print("🩺 HEALTH CHECK: No se puede encontrar el canal de voz designado. La tarea se detendrá.")
+        health_check.stop() # Detenemos la tarea si el canal no existe
+        return
 
-    # Si no está conectado pero debería estarlo (porque el canal existe)
-    if not voice_client and designated_channel:
-        print("🩺 HEALTH CHECK: Bot no está conectado. Intentando conectar...")
+    # Obtenemos el servidor (guild) a través del canal
+    guild = designated_channel.guild
+    
+    # LA CORRECCIÓN: Comprobamos el 'voice_client' directamente desde el servidor.
+    # Esta es la forma más fiable de saber si el bot está conectado en ESE servidor.
+    voice_client = guild.voice_client
+
+    # Si no hay cliente de voz en el servidor, o si existe pero no está conectado...
+    if not voice_client or not voice_client.is_connected():
+        print("🩺 HEALTH CHECK: Bot no está conectado o la conexión está rota. Intentando (re)conectar...")
         try:
+            # Si el objeto existe pero está roto, lo desconectamos primero
+            if voice_client:
+                await voice_client.disconnect(force=True)
+                await asyncio.sleep(2)
+            
             await designated_channel.connect()
             print("✅ HEALTH CHECK: Bot reconectado exitosamente.")
         except Exception as e:
             print(f"❌ HEALTH CHECK: Error al reconectar: {e}")
-    
-    # Si está conectado pero la conexión está "rota" (ej. no se puede reproducir)
-    elif voice_client and not voice_client.is_connected():
-        print("🩺 HEALTH CHECK: Conexión rota detectada. Realizando cirugía...")
-        try:
-            await voice_client.disconnect(force=True)
-            await asyncio.sleep(2)
-            await designated_channel.connect()
-            print("✅ HEALTH CHECK: Cirugía completada.")
-        except Exception as e:
-            print(f"❌ HEALTH CHECK: Error durante la cirugía: {e}")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
