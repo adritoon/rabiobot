@@ -70,26 +70,38 @@ async def on_ready():
     health_check.start()
     bot_is_ready = True
 
-@tasks.loop(seconds=30.0)
+@tasks.loop(seconds=60.0) # Aumentamos a 60s para no saturar
 async def health_check():
-    """Revisa cada 30s si el bot sigue en el canal de voz, si no, lo mete de nuevo."""
+    """Revisa si el bot sigue en el canal de voz, si no, lo mete de nuevo."""
     if not bot_is_ready: return
 
-    channel = bot.get_channel(VOICE_CHANNEL_ID)
-    if not channel: return
+    try:
+        channel = bot.get_channel(VOICE_CHANNEL_ID)
+        if not channel: return
 
-    guild = channel.guild
-    voice_client = guild.voice_client
+        guild = channel.guild
+        voice_client = guild.voice_client
 
-    # Si no hay cliente o no está conectado, reconectar
-    if not voice_client or not voice_client.is_connected():
-        print("re-conectando al canal de voz...")
-        try:
+        # Si no hay cliente o no está conectado...
+        if not voice_client or not voice_client.is_connected():
+            print("⚠️ Detectada desconexión. Intentando recuperar...")
+            
+            # 1. Si existe un cliente 'zombie', lo matamos y ESPERAMOS
             if voice_client:
-                await voice_client.disconnect(force=True)
+                try:
+                    await voice_client.disconnect(force=True)
+                except Exception:
+                    pass # Si ya estaba muerto, no importa
+                
+                # ESTA ES LA CLAVE: Esperar 5 segundos a que Discord limpie la memoria
+                await asyncio.sleep(5) 
+
+            # 2. Intentamos conectar de nuevo
             await channel.connect()
-        except Exception as e:
-            print(f"Error reconectando: {e}")
+            print("✅ Reconexión exitosa.")
+            
+    except Exception as e:
+        print(f"❌ Error en health_check: {e}")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
