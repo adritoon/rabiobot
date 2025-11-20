@@ -51,20 +51,46 @@ async def play_tts(voice_client, text, filename="tts.mp3"):
         pass
 
 async def conectar_al_canal():
-    """Función centralizada para conectar de forma segura"""
+    """Conexión blindada contra el error 'Already connected'"""
     channel = bot.get_channel(VOICE_CHANNEL_ID)
     if not channel: return
     
-    try:
-        # Si ya está conectado, no hacemos nada
-        if channel.guild.voice_client and channel.guild.voice_client.is_connected():
-            return
+    guild = channel.guild
+    voice_client = guild.voice_client
 
+    try:
+        # PASO 1: Limpieza preventiva
+        # Si la librería dice que hay un cliente, verificamos su estado
+        if voice_client:
+            if voice_client.is_connected():
+                print("✅ Ya estoy conectado y estable.")
+                return
+            else:
+                # Está el objeto pero no conectado (Zombie) -> Lo matamos
+                print("🧹 Limpiando conexión zombie...")
+                await voice_client.disconnect(force=True)
+                await asyncio.sleep(2) # Damos tiempo a Discord para procesar
+
+        # PASO 2: Intento de conexión
         print(f"🔌 Conectando a {channel.name}...")
-        await channel.connect(reconnect=True)
+        await channel.connect(timeout=20.0, reconnect=True)
         print("✅ Conexión establecida.")
+
+    except discord.ClientException as e:
+        # Aquí capturamos el error específico "Already connected"
+        if "Already connected" in str(e):
+            print("⚠️ Error 'Already connected' detectado. Forzando reseteo...")
+            # Intentamos obtener el cliente de nuevo por si acaso
+            vc = guild.voice_client
+            if vc:
+                await vc.disconnect(force=True)
+            await asyncio.sleep(3)
+            # Reintento recursivo (una sola vez)
+            await channel.connect(timeout=20.0, reconnect=True)
+        else:
+            print(f"❌ Error ClientException: {e}")
     except Exception as e:
-        print(f"❌ Error al conectar: {e}")
+        print(f"❌ Error general al conectar: {e}")
 
 # --- EVENTOS ---
 
@@ -76,33 +102,35 @@ async def on_ready():
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # 1. LÓGICA DE AUTORRECONEXIÓN (El Fénix)
-    # Si el usuario que cambió de estado SOY YO (el bot)...
+    # 1. LÓGICA DE AUTORRECONEXIÓN
     if member.id == bot.user.id:
-        # ...y el canal 'after' es None, significa que me desconecté/me kickearon
+        # Si me desconecté (after.channel es None)
         if after.channel is None:
-            print("⚠️ ¡Me he desconectado! Intentando volver a entrar...")
-            await asyncio.sleep(1) # Espera técnica
+            print("⚠️ ¡Me he desconectado! Esperando 5s antes de volver...")
+            await asyncio.sleep(5) # ESPERA VITAL para evitar el bucle
             await conectar_al_canal()
-        # Si me movieron a otro canal que no es el mio, vuelvo al mio
+            
+        # Si me movieron a otro canal
         elif after.channel.id != VOICE_CHANNEL_ID:
-            print("⚠️ Me movieron de canal. Volviendo a casa...")
+            print("⚠️ Me movieron. Volviendo a casa...")
+            await asyncio.sleep(1)
             await member.move_to(bot.get_channel(VOICE_CHANNEL_ID))
 
-    # 2. LÓGICA DE BIENVENIDA/DESPEDIDA (Para usuarios normales)
-    if member.id != bot.user.id:
+    # 2. LÓGICA DE BIENVENIDA (Solo usuarios humanos)
+    elif not member.bot: # Ignoramos otros bots para no saturar
         voice_client = discord.utils.get(bot.voice_clients, guild=member.guild)
-        if not voice_client: return
+        if not voice_client or not voice_client.is_connected(): return
 
-        # Entra alguien a mi canal
+        # Entra alguien
         if after.channel and after.channel.id == VOICE_CHANNEL_ID and before.channel != after.channel:
             nombre = re.sub(r'[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ ]', '', member.display_name).strip()
-            await play_tts(voice_client, f"Bienvenido, {nombre}", f"in_{member.id}.mp3")
+            # Usamos una tarea en background para no bloquear el evento
+            bot.loop.create_task(play_tts(voice_client, f"Bienvenido, {nombre}", f"in_{member.id}.mp3"))
         
-        # Sale alguien de mi canal
+        # Sale alguien
         elif before.channel and before.channel.id == VOICE_CHANNEL_ID and after.channel != before.channel:
             nombre = re.sub(r'[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ ]', '', member.display_name).strip()
-            await play_tts(voice_client, f"{nombre} ha salido", f"out_{member.id}.mp3")
+            bot.loop.create_task(play_tts(voice_client, f"{nombre} ha salido", f"out_{member.id}.mp3"))
 
 @bot.event
 async def on_message(message):
