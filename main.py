@@ -13,23 +13,24 @@ from config import (
     FOLLOWME_EXEMPT_USER_ID
 )
 
-# Leemos el token del sistema (recuerda actualizarlo en tu .bashrc con el nuevo)
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 # --- INTENTS ---
 intents = discord.Intents.default()
 intents.guilds = True
-intents.voice_states = True # Vital para detectar desconexiones
-intents.members = True      # Vital para leer nombres
+intents.voice_states = True
+intents.members = True
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Variables
+# --- VARIABLES DE ESTADO ---
 tts_bridge_enabled = True
 followed_user_ids = set()
+# SEMÁFORO: Esta variable evita que el bot intente conectarse 5 veces a la vez
+is_reconnecting = False 
 
-# --- FUNCIONES AUXILIARES ---
+# --- FUNCIONES DE AUDIO ---
 async def play_tts(voice_client, text, filename="tts.mp3"):
     if not voice_client or not voice_client.is_connected(): return
     try:
@@ -50,81 +51,79 @@ async def play_tts(voice_client, text, filename="tts.mp3"):
     except Exception:
         pass
 
-async def conectar_al_canal():
-    """Conexión blindada contra el error 'Already connected'"""
+async def conectar_seguro():
+    """Maneja la conexión de forma ordenada usando el semáforo global."""
+    global is_reconnecting
+    
     channel = bot.get_channel(VOICE_CHANNEL_ID)
     if not channel: return
-    
+
     guild = channel.guild
     voice_client = guild.voice_client
 
+    # 1. Si ya estamos conectados y bien, no hacemos nada
+    if voice_client and voice_client.is_connected():
+        return
+
+    # 2. Limpieza de zombies (si existe el objeto pero no funciona)
+    if voice_client:
+        try:
+            await voice_client.disconnect(force=True)
+        except:
+            pass
+        # Espera técnica para que Discord procese la salida
+        await asyncio.sleep(3)
+
+    # 3. Intento de conexión
     try:
-        # PASO 1: Limpieza preventiva
-        # Si la librería dice que hay un cliente, verificamos su estado
-        if voice_client:
-            if voice_client.is_connected():
-                print("✅ Ya estoy conectado y estable.")
-                return
-            else:
-                # Está el objeto pero no conectado (Zombie) -> Lo matamos
-                print("🧹 Limpiando conexión zombie...")
-                await voice_client.disconnect(force=True)
-                await asyncio.sleep(2) # Damos tiempo a Discord para procesar
-
-        # PASO 2: Intento de conexión
-        print(f"🔌 Conectando a {channel.name}...")
-        await channel.connect(timeout=20.0, reconnect=True)
-        print("✅ Conexión establecida.")
-
-    except discord.ClientException as e:
-        # Aquí capturamos el error específico "Already connected"
-        if "Already connected" in str(e):
-            print("⚠️ Error 'Already connected' detectado. Forzando reseteo...")
-            # Intentamos obtener el cliente de nuevo por si acaso
-            vc = guild.voice_client
-            if vc:
-                await vc.disconnect(force=True)
-            await asyncio.sleep(3)
-            # Reintento recursivo (una sola vez)
-            await channel.connect(timeout=20.0, reconnect=True)
-        else:
-            print(f"❌ Error ClientException: {e}")
+        print(f"🔌 Intentando conectar a {channel.name}...")
+        await channel.connect(timeout=30.0, reconnect=True)
+        print("✅ Conexión establecida correctamente.")
+        is_reconnecting = False # Bajamos la bandera de alerta
     except Exception as e:
-        print(f"❌ Error general al conectar: {e}")
+        print(f"❌ Falló la conexión: {e}")
+        # Si falla, esperamos un poco más antes de permitir otro intento
+        await asyncio.sleep(5)
+        is_reconnecting = False
 
 # --- EVENTOS ---
-
 @bot.event
 async def on_ready():
-    print(f'🤖 Nuevo Bot conectado como: {bot.user.name}')
-    # Conexión inicial
-    await conectar_al_canal()
+    print(f'🤖 Bot v3.0 listo como: {bot.user.name}')
+    # Primer intento al arrancar
+    await conectar_seguro()
 
 @bot.event
 async def on_voice_state_update(member, before, after):
-    # 1. LÓGICA DE AUTORRECONEXIÓN
+    global is_reconnecting
+
+    # --- LÓGICA DEL BOT (AUTORRECONEXIÓN) ---
     if member.id == bot.user.id:
-        # Si me desconecté (after.channel es None)
+        # Caso: Me desconecté (after.channel es None)
         if after.channel is None:
-            print("⚠️ ¡Me he desconectado! Esperando 5s antes de volver...")
-            await asyncio.sleep(5) # ESPERA VITAL para evitar el bucle
-            await conectar_al_canal()
+            # SI YA ESTAMOS RECONECTANDO, IGNORAMOS ESTE EVENTO (STOP LOOP)
+            if is_reconnecting:
+                return
             
-        # Si me movieron a otro canal
+            print("⚠️ ¡Se cayó la conexión! Iniciando protocolo de rescate...")
+            is_reconnecting = True # Levantamos la bandera
+            await asyncio.sleep(2) # Esperamos un poco
+            await conectar_seguro()
+
+        # Caso: Me movieron de canal
         elif after.channel.id != VOICE_CHANNEL_ID:
-            print("⚠️ Me movieron. Volviendo a casa...")
+            print("⚠️ Me movieron. Regresando...")
             await asyncio.sleep(1)
             await member.move_to(bot.get_channel(VOICE_CHANNEL_ID))
 
-    # 2. LÓGICA DE BIENVENIDA (Solo usuarios humanos)
-    elif not member.bot: # Ignoramos otros bots para no saturar
+    # --- LÓGICA DE USUARIOS (BIENVENIDAS) ---
+    elif not member.bot:
         voice_client = discord.utils.get(bot.voice_clients, guild=member.guild)
         if not voice_client or not voice_client.is_connected(): return
 
         # Entra alguien
         if after.channel and after.channel.id == VOICE_CHANNEL_ID and before.channel != after.channel:
             nombre = re.sub(r'[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ ]', '', member.display_name).strip()
-            # Usamos una tarea en background para no bloquear el evento
             bot.loop.create_task(play_tts(voice_client, f"Bienvenido, {nombre}", f"in_{member.id}.mp3"))
         
         # Sale alguien
@@ -132,42 +131,31 @@ async def on_voice_state_update(member, before, after):
             nombre = re.sub(r'[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ ]', '', member.display_name).strip()
             bot.loop.create_task(play_tts(voice_client, f"{nombre} ha salido", f"out_{member.id}.mp3"))
 
+# ... (El resto de on_message y comandos sigue igual) ...
 @bot.event
 async def on_message(message):
     if message.author.bot or not message.guild: return
-    
     texto_limpio = re.sub(r'https?://\S+| <a?:.+?:\d+>', '', message.clean_content).strip()
     if not texto_limpio: return
-
     voice_client = discord.utils.get(bot.voice_clients, guild=message.guild)
-    
-    # COMANDOS DE TEXTO (Bridge y Followme)
     should_speak = False
     text_to_say = texto_limpio
-
-    # Bridge
-    if (tts_bridge_enabled and 
-        message.channel.id == TTS_BRIDGE_CHANNEL_ID and 
-        discord.utils.get(message.author.roles, name=TTS_BRIDGE_ROLE_NAME)):
+    if (tts_bridge_enabled and message.channel.id == TTS_BRIDGE_CHANNEL_ID and discord.utils.get(message.author.roles, name=TTS_BRIDGE_ROLE_NAME)):
         text_to_say = f"{message.author.display_name} dice: {texto_limpio}"
         should_speak = True
-    
-    # Follow me
     elif message.author.id in followed_user_ids:
         if len(followed_user_ids) > 1 and message.author.id != FOLLOWME_EXEMPT_USER_ID:
             text_to_say = f"{message.author.display_name} dice: {texto_limpio}"
         should_speak = True
-
     if should_speak and voice_client:
         await play_tts(voice_client, text_to_say, f"msg_{message.id}.mp3")
 
-# --- COMANDOS SLASH ---
-@bot.slash_command(name="followme", description="El bot leerá tus mensajes.")
+@bot.slash_command(name="followme")
 async def followme(ctx):
     followed_user_ids.add(ctx.author.id)
     await ctx.respond("✅ Activado.", ephemeral=True)
 
-@bot.slash_command(name="unfollowme", description="El bot dejará de leerte.")
+@bot.slash_command(name="unfollowme")
 async def unfollowme(ctx):
     followed_user_ids.discard(ctx.author.id)
     await ctx.respond("✅ Desactivado.", ephemeral=True)
@@ -176,4 +164,4 @@ if __name__ == "__main__":
     if DISCORD_TOKEN:
         bot.run(DISCORD_TOKEN)
     else:
-        print("❌ ERROR: No hay Token configurado.")
+        print("❌ ERROR: No Token.")
