@@ -82,37 +82,37 @@ async def on_ready():
     if not health_check.is_running():
         health_check.start()
 
-@tasks.loop(seconds=30.0) # Bajamos a 30s para que reaccione más rápido
+@tasks.loop(seconds=30.0)
 async def health_check():
     if not bot_is_ready: return
 
     try:
         channel = bot.get_channel(VOICE_CHANNEL_ID)
         if not channel: return
+        
+        # SIEMPRE refrescamos la caché del servidor antes de buscar
+        # Esto asegura que la lista de miembros 'channel.members' sea real y reciente
+        guild = channel.guild
+        if guild.chunked is False: 
+            await guild.chunk()
 
-        # LA PRUEBA DE REALIDAD:
-        # Buscamos si el bot (bot.user.id) está realmente en la lista de gente del canal
+        # Buscamos al bot en la lista
         estoy_en_sala = discord.utils.get(channel.members, id=bot.user.id)
 
-        # Si NO estoy en la sala, hay que entrar sí o sí
         if not estoy_en_sala:
-            print("⚠️ Ojo: No estoy en la lista de miembros del canal. Forzando entrada...")
-            
-            # 1. Limpieza: Si el bot tiene un cliente 'fantasma' conectado, lo matamos
-            voice_client = channel.guild.voice_client
+            print("⚠️ No me veo en la lista. Entrando...")
+            voice_client = guild.voice_client
             if voice_client:
                 try:
                     await voice_client.disconnect(force=True)
-                except:
-                    pass # Si falla la desconexión no importa, seguimos
+                except: pass
             
-            # 2. Conexión Limpia
-            await asyncio.sleep(2) # Pequeño respiro
+            await asyncio.sleep(2)
             await channel.connect(reconnect=True)
             print("✅ He vuelto a entrar.")
 
     except Exception as e:
-        print(f"❌ Error recuperando conexión: {e}")
+        print(f"❌ Error en health_check: {e}")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
