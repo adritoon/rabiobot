@@ -66,52 +66,47 @@ async def on_ready():
     global bot_is_ready
     print(f'✅ Bot conectado como: {bot.user.name}')
     
-    # 1. Conexión INICIAL (Lo hacemos aquí para asegurar que entra al prender)
+    # 1. Conexión INICIAL
     channel = bot.get_channel(VOICE_CHANNEL_ID)
     if channel:
         if not bot.voice_clients:
             try:
-                # self_deaf=True ahorra ancho de banda y es más estable
-                await channel.connect(reconnect=True, self_deaf=True)
+                # Quitamos 'self_deaf=True' que causaba el error
+                await channel.connect(reconnect=True)
                 print(f"🎧 Conectado inicialmente a: {channel.name}")
             except Exception as e:
                 print(f"Error conexión inicial: {e}")
     
-    # 2. Esperamos a que el bot esté listo antes de iniciar el vigilante
+    # 2. Arrancar vigilante
     bot_is_ready = True
     if not health_check.is_running():
         health_check.start()
 
 @tasks.loop(seconds=60.0)
 async def health_check():
-    # Si el bot aun no carga, no hacemos nada
     if not bot_is_ready: return
 
     try:
         channel = bot.get_channel(VOICE_CHANNEL_ID)
         if not channel: return
 
-        # Verificamos el cliente de voz del servidor
         voice_client = channel.guild.voice_client
 
-        # CASO 1: El bot NO tiene cliente de voz (Se cayó totalmente)
+        # CASO 1: Desconectado totalmente
         if not voice_client:
             print("⚠️ Bot desconectado. Reconectando...")
-            await channel.connect(reconnect=True, self_deaf=True)
+            # Quitamos 'self_deaf=True' aquí también
+            await channel.connect(reconnect=True)
             return
 
-        # CASO 2: El bot tiene cliente, pero no está en el canal correcto
-        # (A veces pasa que se queda 'bugeado' en un canal null)
+        # CASO 2: Canal incorrecto
         if voice_client.channel.id != VOICE_CHANNEL_ID:
-            print("⚠️ Bot en canal incorrecto o estado zombie. Moviendo...")
+            print("⚠️ Bot en canal incorrecto. Moviendo...")
             await voice_client.disconnect(force=True)
-            await asyncio.sleep(3) # Pausa de seguridad
-            await channel.connect(reconnect=True, self_deaf=True)
+            await asyncio.sleep(3)
+            await channel.connect(reconnect=True)
             return
-            
-        # Si llegamos aquí, todo está bien. No tocamos nada.
-        # (Hemos eliminado el check de 'is_connected()' porque a veces miente en Linux)
-
+        
     except Exception as e:
         print(f"❌ Error menor en health_check: {e}")
 
