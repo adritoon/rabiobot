@@ -1,7 +1,8 @@
 # config.py
 
 # ID del canal de voz donde vivirá el bot
-VOICE_CHANNEL_ID = 1355955093010252024 
+VOICE_CHANNEL_ID = 1369129286052741212
+#1355955093010252024 
 
 # ID del canal de texto que el bot leerá
 TTS_BRIDGE_CHANNEL_ID = 1425150707656560651 
