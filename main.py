@@ -15,6 +15,7 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 # --- INTENTS ---
 intents = discord.Intents.default()
 intents.message_content = True
+intents.voice_states = True
 # intents.voice_states = True # Ya no es crítico para la reconexión, pero útil
 bot = commands.Bot(command_prefix="!", intents=intents)
 
