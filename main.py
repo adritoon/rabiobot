@@ -1,167 +1,107 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks # Importamos tasks para el bucle
 import asyncio
 import os
+from dotenv import load_dotenv
 from gtts import gTTS
 import re
 
 # --- CONFIGURACIÓN ---
-from config import (
-    VOICE_CHANNEL_ID,
-    TTS_BRIDGE_CHANNEL_ID,
-    TTS_BRIDGE_ROLE_NAME,
-    FOLLOWME_EXEMPT_USER_ID
-)
+from config import VOICE_CHANNEL_ID
 
+load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 # --- INTENTS ---
 intents = discord.Intents.default()
-intents.guilds = True
-intents.voice_states = True
-intents.members = True
 intents.message_content = True
-
+# intents.voice_states = True # Ya no es crítico para la reconexión, pero útil
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- VARIABLES DE ESTADO ---
-tts_bridge_enabled = True
-followed_user_ids = set()
-# SEMÁFORO: Esta variable evita que el bot intente conectarse 5 veces a la vez
-is_reconnecting = False 
-
-# --- FUNCIONES DE AUDIO ---
-async def play_tts(voice_client, text, filename="tts.mp3"):
+# --- SISTEMA DE AUDIO (Simplificado) ---
+async def play_tts(voice_client, text):
     if not voice_client or not voice_client.is_connected(): return
     try:
-        if voice_client.is_playing():
-            voice_client.stop()
-            await asyncio.sleep(0.2)
+        # Si ya está hablando, no interrumpimos (o puedes poner stop() si prefieres)
+        if voice_client.is_playing(): return 
 
+        filename = f"tts_{os.urandom(4).hex()}.mp3"
         tts = gTTS(text=text, lang='es', slow=False)
         tts.save(filename)
         
+        # Opciones para que suene más rápido/natural
         ffmpeg_options = {"options": "-af atempo=1.25"}
         source = discord.FFmpegPCMAudio(filename, **ffmpeg_options)
-        voice_client.play(source)
         
-        while voice_client.is_playing(): 
-            await asyncio.sleep(0.5)
-        if os.path.exists(filename): os.remove(filename)
-    except Exception:
-        pass
+        voice_client.play(source, after=lambda e: clean_file(filename))
+    except Exception as e:
+        print(f"Error audio: {e}")
+        clean_file(filename)
 
-async def conectar_seguro():
-    """Maneja la conexión de forma ordenada usando el semáforo global."""
-    global is_reconnecting
-    
+def clean_file(filename):
+    if os.path.exists(filename):
+        try: os.remove(filename)
+        except: pass
+
+# --- BUCLE DE CONEXIÓN ETERNA ---
+@tasks.loop(seconds=30) # Revisa cada 30 segundos
+async def maintenance_loop():
     channel = bot.get_channel(VOICE_CHANNEL_ID)
-    if not channel: return
-
-    guild = channel.guild
-    voice_client = guild.voice_client
-
-    # 1. Si ya estamos conectados y bien, no hacemos nada
-    if voice_client and voice_client.is_connected():
+    if not channel:
+        print("❌ Error: No encuentro el canal de voz.")
         return
 
-    # 2. Limpieza de zombies (si existe el objeto pero no funciona)
-    if voice_client:
-        try:
-            await voice_client.disconnect(force=True)
-        except:
-            pass
-        # Espera técnica para que Discord procese la salida
-        await asyncio.sleep(3)
+    # Buscamos si el bot ya tiene una conexión en ese servidor
+    voice_client = discord.utils.get(bot.voice_clients, guild=channel.guild)
 
-    # 3. Intento de conexión
     try:
-        print(f"🔌 Intentando conectar a {channel.name}...")
-        await channel.connect(timeout=30.0, reconnect=True)
-        print("✅ Conexión establecida correctamente.")
-        is_reconnecting = False # Bajamos la bandera de alerta
+        if voice_client is None:
+            # CASO 1: No está conectado -> Conectar
+            print("🔌 Conectando al canal...")
+            await channel.connect()
+        elif not voice_client.is_connected():
+            # CASO 2: El objeto existe pero está 'muerto' -> Limpiar y reconectar
+            await voice_client.disconnect(force=True)
+            await channel.connect()
+        elif voice_client.channel.id != VOICE_CHANNEL_ID:
+            # CASO 3: Está conectado pero en el canal equivocado -> Mover
+            print("kamove a su sitio...")
+            await voice_client.move_to(channel)
+        else:
+            # CASO 4: Todo perfecto -> No hacer nada
+            pass
+            
     except Exception as e:
-        print(f"❌ Falló la conexión: {e}")
-        # Si falla, esperamos un poco más antes de permitir otro intento
-        await asyncio.sleep(5)
-        is_reconnecting = False
+        print(f"⚠️ Error en mantenimiento: {e}")
+
+# Esperar a que el bot esté listo antes de arrancar el bucle
+@maintenance_loop.before_loop
+async def before_maintenance():
+    await bot.wait_until_ready()
 
 # --- EVENTOS ---
 @bot.event
 async def on_ready():
-    print(f'🤖 Bot v3.0 listo como: {bot.user.name}')
-    # Primer intento al arrancar
-    await conectar_seguro()
+    print(f'✅ Bot conectado como: {bot.user.name}')
+    # Arrancamos el guardia de seguridad si no está corriendo ya
+    if not maintenance_loop.is_running():
+        maintenance_loop.start()
 
-@bot.event
-async def on_voice_state_update(member, before, after):
-    global is_reconnecting
-
-    # --- LÓGICA DEL BOT (AUTORRECONEXIÓN) ---
-    if member.id == bot.user.id:
-        # Caso: Me desconecté (after.channel es None)
-        if after.channel is None:
-            # SI YA ESTAMOS RECONECTANDO, IGNORAMOS ESTE EVENTO (STOP LOOP)
-            if is_reconnecting:
-                return
-            
-            print("⚠️ ¡Se cayó la conexión! Iniciando protocolo de rescate...")
-            is_reconnecting = True # Levantamos la bandera
-            await asyncio.sleep(2) # Esperamos un poco
-            await conectar_seguro()
-
-        # Caso: Me movieron de canal
-        elif after.channel.id != VOICE_CHANNEL_ID:
-            print("⚠️ Me movieron. Regresando...")
-            await asyncio.sleep(1)
-            await member.move_to(bot.get_channel(VOICE_CHANNEL_ID))
-
-    # --- LÓGICA DE USUARIOS (BIENVENIDAS) ---
-    elif not member.bot:
-        voice_client = discord.utils.get(bot.voice_clients, guild=member.guild)
-        if not voice_client or not voice_client.is_connected(): return
-
-        # Entra alguien
-        if after.channel and after.channel.id == VOICE_CHANNEL_ID and before.channel != after.channel:
-            nombre = re.sub(r'[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ ]', '', member.display_name).strip()
-            bot.loop.create_task(play_tts(voice_client, f"Bienvenido, {nombre}", f"in_{member.id}.mp3"))
-        
-        # Sale alguien
-        elif before.channel and before.channel.id == VOICE_CHANNEL_ID and after.channel != before.channel:
-            nombre = re.sub(r'[^a-zA-Z0-9áéíóúñÁÉÍÓÚÑ ]', '', member.display_name).strip()
-            bot.loop.create_task(play_tts(voice_client, f"{nombre} ha salido", f"out_{member.id}.mp3"))
-
-# ... (El resto de on_message y comandos sigue igual) ...
 @bot.event
 async def on_message(message):
     if message.author.bot or not message.guild: return
-    texto_limpio = re.sub(r'https?://\S+| <a?:.+?:\d+>', '', message.clean_content).strip()
-    if not texto_limpio: return
+    
+    # Filtro simple: Solo lee mensajes en el canal de texto donde esté configurado
+    # Opcional: añade condiciones aquí si solo quieres que lea ciertos canales
+    
     voice_client = discord.utils.get(bot.voice_clients, guild=message.guild)
-    should_speak = False
-    text_to_say = texto_limpio
-    if (tts_bridge_enabled and message.channel.id == TTS_BRIDGE_CHANNEL_ID and discord.utils.get(message.author.roles, name=TTS_BRIDGE_ROLE_NAME)):
-        text_to_say = f"{message.author.display_name} dice: {texto_limpio}"
-        should_speak = True
-    elif message.author.id in followed_user_ids:
-        if len(followed_user_ids) > 1 and message.author.id != FOLLOWME_EXEMPT_USER_ID:
-            text_to_say = f"{message.author.display_name} dice: {texto_limpio}"
-        should_speak = True
-    if should_speak and voice_client:
-        await play_tts(voice_client, text_to_say, f"msg_{message.id}.mp3")
-
-@bot.slash_command(name="followme")
-async def followme(ctx):
-    followed_user_ids.add(ctx.author.id)
-    await ctx.respond("✅ Activado.", ephemeral=True)
-
-@bot.slash_command(name="unfollowme")
-async def unfollowme(ctx):
-    followed_user_ids.discard(ctx.author.id)
-    await ctx.respond("✅ Desactivado.", ephemeral=True)
+    
+    # Limpieza de texto (URLs y Emojis de Discord)
+    texto_limpio = re.sub(r'https?://\S+| <a?:.+?:\d+>', '', message.clean_content).strip()
+    
+    if texto_limpio and voice_client:
+        texto_final = f"{message.author.display_name} dice: {texto_limpio}"
+        await play_tts(voice_client, texto_final)
 
 if __name__ == "__main__":
-    if DISCORD_TOKEN:
-        bot.run(DISCORD_TOKEN)
-    else:
-        print("❌ ERROR: No Token.")
+    bot.run(DISCORD_TOKEN)
